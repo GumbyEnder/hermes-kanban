@@ -11,7 +11,8 @@ export interface KanbanCard {
   dueDate?: string;
   blocked?: boolean;
   blockerReason?: string;
-  linkedCards?: string[];   // wikilink refs e.g. [[Kanban/OtherBoard::Column::Title]]
+  linkedCards?: string[];
+  recur?: string;           // 'daily' | 'weekly' | 'monthly' | 'YYYY-MM-DD'
   checked: boolean;
 }
 
@@ -227,6 +228,58 @@ export class KanbanParser {
   // --- Private helpers ---
 
   /**
+   * Process recurring cards — find Done cards with recur: field, re-create them in Backlog.
+   * Call this on a schedule (e.g. daily standup) to auto-refresh recurring tasks.
+   */
+  async processRecurring(body: { boardId?: string }): Promise<{ ok: boolean; recreated: number; cards: string[] }> {
+    const result = await this.queryCards({ boardId: body.boardId });
+    const today = new Date();
+    const todayStr = today.toISOString().slice(0, 10);
+    const recreated: string[] = [];
+
+    for (const card of result.cards) {
+      if (!card.recur || !card.checked) continue;
+
+      let shouldRecreate = false;
+      let nextDue: string | undefined;
+
+      if (card.recur === 'daily') {
+        shouldRecreate = true;
+        nextDue = todayStr;
+      } else if (card.recur === 'weekly') {
+        shouldRecreate = true;
+        const next = new Date(today);
+        next.setDate(next.getDate() + 7);
+        nextDue = next.toISOString().slice(0, 10);
+      } else if (card.recur === 'monthly') {
+        shouldRecreate = true;
+        const next = new Date(today);
+        next.setMonth(next.getMonth() + 1);
+        nextDue = next.toISOString().slice(0, 10);
+      } else if (/^\d{4}-\d{2}-\d{2}$/.test(card.recur)) {
+        // Specific date recurrence — only recreate if that date is today or past
+        shouldRecreate = card.recur <= todayStr;
+        nextDue = card.recur;
+      }
+
+      if (shouldRecreate) {
+        await this.addCard({
+          boardId: card.boardId,
+          column: 'Backlog',
+          title: card.title,
+          priority: card.priority,
+          tags: card.tags,
+          dueDate: nextDue,
+          recur: card.recur,
+        } as any);
+        recreated.push(card.title);
+      }
+    }
+
+    return { ok: true, recreated: recreated.length, cards: recreated };
+  }
+
+  /**
    * Link two cards across boards. Adds a wikilink on the source card pointing to the target.
    */
   async linkCards(body: { fromCardId: string; toCardId: string }): Promise<{ ok: boolean; message?: string; error?: string }> {
@@ -322,6 +375,8 @@ export class KanbanParser {
     const blocked = !!blockedMatch;
     const blockerReason = blockedMatch ? blockedMatch[1].trim() : undefined;
     const linkedMatches = [...rest.matchAll(/\[\[([^\]]+)\]\]/g)].map(m => m[1]);
+    const recurMatch = rest.match(/recur:(daily|weekly|monthly|\d{4}-\d{2}-\d{2})/i);
+    const recur = recurMatch ? recurMatch[1].toLowerCase() : undefined;
 
     return {
       id: `${boardId}::${column}::${title}`,
@@ -335,6 +390,7 @@ export class KanbanParser {
       blocked,
       blockerReason,
       linkedCards: linkedMatches.length ? linkedMatches : undefined,
+      recur,
     };
   }
 
@@ -342,6 +398,7 @@ export class KanbanParser {
     let line = `- [ ] ${card.title}`;
     if (card.priority) line += ` | #${card.priority}`;
     if (card.dueDate) line += ` | due:${card.dueDate}`;
+    if (card.recur) line += ` | recur:${card.recur}`;
     if (card.tags?.length) line += ` | ${card.tags.map((t: string) => `@${t}`).join(' ')}`;
     if (card.blocked && card.blockerReason) line += ` | blocked:${card.blockerReason}`;
     if (card.linkedCards?.length) line += ` | ${card.linkedCards.map((l: string) => `[[${l}]]`).join(' ')}`;

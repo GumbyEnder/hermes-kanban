@@ -129,6 +129,11 @@ export class KanbanServer {
       return await this.parser.getCardLinks(decodeURIComponent(cardId));
     }
 
+    // Process recurring cards
+    if (method === 'POST' && path === '/cards/process-recurring') {
+      return await this.parser.processRecurring(body);
+    }
+
     if (method === 'POST' && path === '/ritual/standup') {
       return await this.parser.generateStandup(body);
     }
