@@ -1,0 +1,38 @@
+name: Build Plugin
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: plugin/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: plugin
+
+      - name: TypeScript check
+        run: npx tsc --noEmit --skipLibCheck
+        working-directory: plugin
+
+      - name: Build plugin
+        run: npm run build
+        working-directory: plugin
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-build
+          path: plugin/main.js
