@@ -137,11 +137,11 @@ hermes-kanban/
 ### Phase 4 — Integration & Testing
 | # | Task | Owner | Status | Notes |
 |---|------|-------|--------|-------|
-| 4.1 | Build plugin and load in Obsidian (BRAT or folder) | Gumby | PENDING | |
-| 4.2 | End-to-end test: break down a goal into a board | Frodo | PENDING | |
-| 4.3 | End-to-end test: daily standup ritual | Frodo | PENDING | |
-| 4.4 | End-to-end test: move card, query blocked | Frodo | PENDING | |
-| 4.5 | Fallback test: plugin offline, Markdown mode | Frodo | PENDING | |
+| 4.1 | Build plugin and load in Obsidian (BRAT or folder) | Gumby | DONE | Manual copy via install script |
+| 4.2 | End-to-end test: break down a goal into a board | Frodo | DONE | stretch goals board created live |
+| 4.3 | End-to-end test: daily standup ritual | Frodo | PENDING | Next session |
+| 4.4 | End-to-end test: move card, query blocked | Frodo | PENDING | Next session |
+| 4.5 | Fallback test: plugin offline, Markdown mode | Frodo | PENDING | Next session |
 
 ### Phase 5 — CI/CD & Docs
 | # | Task | Owner | Status | Notes |
@@ -203,6 +203,9 @@ All write endpoints return `{ ok: true, message: string }` or `{ ok: false, erro
 | 2026-04-22 | Expand scope to include CI/CD, install script, MCP stretch | Gumby gave full execution authority |
 | 2026-04-22 | Use /mnt/nas/agents/projets/hermes-kanban as working dir | NAS preferred for project outputs |
 | 2026-04-22 | kanban-orchestrator.md skill exists as draft — reuse + update | Avoid duplicate work |
+| 2026-04-22 | Bundle obsidian-kanban (mgmeyers) in install script instead of forking | Less maintenance, respects MIT license |
+| 2026-04-22 | Bind server to 0.0.0.0 instead of 127.0.0.1 | Hermes runs on a different machine; Tailscale access required |
+| 2026-04-22 | Add kanban-plugin: board frontmatter to all created boards | Required by obsidian-kanban to render visual board |
 
 ---
 
@@ -211,6 +214,13 @@ All write endpoints return `{ ok: true, message: string }` or `{ ok: false, erro
 | Date | Change | Author |
 |------|--------|--------|
 | 2026-04-22 | Execution document created, Phase 0 tasks scoped | Frodo |
+| 2026-04-22 | Phases 0-3 + 5 complete — plugin built, skills installed, CI live | Frodo |
+| 2026-04-22 | Fix: bind server to 0.0.0.0 for Tailscale/cross-machine access | Frodo |
+| 2026-04-22 | Fix: add kanban-plugin: board frontmatter to all created boards | Frodo |
+| 2026-04-22 | Fix: install script updated to bundle obsidian-kanban visual renderer | Frodo |
+| 2026-04-22 | Phase 4: plugin live in Obsidian, stretch goals board created end-to-end | Frodo |
+| 2026-04-22 | Docs: README rewritten with full troubleshooting section | Frodo |
+| 2026-04-22 | Stretch goals backlog active in Obsidian Kanban board | Frodo |
 
 ---
 
