@@ -3,6 +3,7 @@ export interface HermesKanbanSettings {
   boardFolder: string;
   trustMode: 'confirm' | 'auto';
   enabled: boolean;
+  mcpEnabled: boolean;
 }
 
 export const DEFAULT_SETTINGS: HermesKanbanSettings = {
@@ -10,4 +11,5 @@ export const DEFAULT_SETTINGS: HermesKanbanSettings = {
   boardFolder: 'Kanban',
   trustMode: 'confirm',
   enabled: true,
+  mcpEnabled: false,
 };

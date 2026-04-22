@@ -1,10 +1,12 @@
 import { Plugin, PluginSettingTab, App, Setting } from 'obsidian';
 import { HermesKanbanSettings, DEFAULT_SETTINGS } from './settings';
 import { KanbanServer } from './server';
+import { McpAdapter } from './mcp-adapter';
 
 export default class HermesKanbanPlugin extends Plugin {
   settings: HermesKanbanSettings = DEFAULT_SETTINGS;
   server: KanbanServer | null = null;
+  mcpAdapter: McpAdapter | null = null;
 
   async onload() {
     await this.loadSettings();
@@ -12,6 +14,13 @@ export default class HermesKanbanPlugin extends Plugin {
 
     if (this.settings.enabled) {
       this.server.start();
+    }
+
+    if (this.settings.mcpEnabled && this.server) {
+      const { KanbanParser } = await import('./kanban-parser');
+      const parser = new KanbanParser(this.app);
+      this.mcpAdapter = new McpAdapter(this.app, this.settings, parser);
+      this.mcpAdapter.start();
     }
 
     this.addSettingTab(new HermesKanbanSettingTab(this.app, this));
@@ -28,11 +37,30 @@ export default class HermesKanbanPlugin extends Plugin {
       }
     });
 
+    this.addCommand({
+      id: 'toggle-mcp',
+      name: 'Toggle Hermes Kanban MCP adapter',
+      callback: async () => {
+        this.settings.mcpEnabled = !this.settings.mcpEnabled;
+        if (this.settings.mcpEnabled) {
+          const { KanbanParser } = await import('./kanban-parser');
+          const parser = new KanbanParser(this.app);
+          this.mcpAdapter = new McpAdapter(this.app, this.settings, parser);
+          this.mcpAdapter.start();
+        } else {
+          this.mcpAdapter?.stop();
+          this.mcpAdapter = null;
+        }
+        this.saveSettings();
+      }
+    });
+
     console.log('Hermes Kanban Bridge loaded');
   }
 
   onunload() {
     this.server?.stop();
+    this.mcpAdapter?.stop();
     console.log('Hermes Kanban Bridge unloaded');
   }
 
@@ -104,6 +132,26 @@ class HermesKanbanSettingTab extends PluginSettingTab {
           this.plugin.settings.enabled = value;
           await this.plugin.saveSettings();
           value ? this.plugin.server?.start() : this.plugin.server?.stop();
+        }));
+
+    new Setting(containerEl)
+      .setName('Enable MCP adapter')
+      .setDesc(`Expose Kanban tools via MCP on port ${this.plugin.settings.port + 1} (Claude Desktop, Cursor, Zed, etc.)`)
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.mcpEnabled)
+        .onChange(async (value) => {
+          this.plugin.settings.mcpEnabled = value;
+          await this.plugin.saveSettings();
+          if (value) {
+            import('./kanban-parser').then(({ KanbanParser }) => {
+              const parser = new KanbanParser(this.plugin.app);
+              this.plugin.mcpAdapter = new McpAdapter(this.plugin.app, this.plugin.settings, parser);
+              this.plugin.mcpAdapter?.start();
+            });
+          } else {
+            this.plugin.mcpAdapter?.stop();
+            this.plugin.mcpAdapter = null;
+          }
         }));
   }
 }
