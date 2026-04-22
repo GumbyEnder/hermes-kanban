@@ -318,7 +318,14 @@ export class KanbanParser {
   }
 
   private buildBoardMarkdown(title: string, columns: string[]): string {
-    const lines = [`# ${title}`, ``];
+    const lines = [
+      `---`,
+      `kanban-plugin: board`,
+      `---`,
+      ``,
+      `# ${title}`,
+      ``
+    ];
     for (const col of columns) {
       lines.push(`## ${col}`, ``);
     }
