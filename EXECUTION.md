@@ -98,41 +98,41 @@ hermes-kanban/
 |---|------|-------|--------|-------|
 | 0.1 | Create execution document | Frodo | DONE | This file |
 | 0.2 | Create working folder on NAS | Frodo | DONE | /mnt/nas/agents/projets/hermes-kanban |
-| 0.3 | Clone/init GitHub repo locally | Dev | PENDING | git clone to NAS working dir |
-| 0.4 | Bootstrap plugin scaffold (obsidianmd template) | Dev | PENDING | npx degit |
-| 0.5 | Set up tsconfig + esbuild pipeline | Dev | PENDING | |
-| 0.6 | Create skills/ and docs/ folder structure | Dev | PENDING | |
+| 0.3 | Clone/init GitHub repo locally | Dev | DONE | git init + remote set, pushed to main |
+| 0.4 | Bootstrap plugin scaffold (obsidianmd template) | Dev | DONE | Manual scaffold (degit unavailable) |
+| 0.5 | Set up tsconfig + esbuild pipeline | Dev | DONE | Build passes clean (tsc + esbuild) |
+| 0.6 | Create skills/ and docs/ folder structure | Dev | DONE | All folders created |
 
 ### Phase 1 — Plugin Core
 | # | Task | Owner | Status | Notes |
 |---|------|-------|--------|-------|
-| 1.1 | Implement settings tab (port, board folder, trust) | Dev | PENDING | |
-| 1.2 | Implement embedded HTTP server (server.ts) | Dev | PENDING | Use Node http or express-like |
-| 1.3 | GET /boards — list all Kanban boards in vault | Dev | PENDING | |
-| 1.4 | POST /boards — create new board with custom columns | Dev | PENDING | |
-| 1.5 | POST /cards — add card to a board/column | Dev | PENDING | |
-| 1.6 | PUT /cards/:id — update card metadata | Dev | PENDING | |
-| 1.7 | POST /cards/move — move card between columns | Dev | PENDING | |
-| 1.8 | GET /query — filter by status, tag, due date | Dev | PENDING | |
-| 1.9 | User confirmation modal for all write ops | Dev | PENDING | |
-| 1.10 | Kanban Markdown parser (mgmeyers format) | Dev | PENDING | |
+| 1.1 | Implement settings tab (port, board folder, trust) | Dev | DONE | settings.ts + main.ts SettingTab |
+| 1.2 | Implement embedded HTTP server (server.ts) | Dev | DONE | Node http module, all routes |
+| 1.3 | GET /boards — list all Kanban boards in vault | Dev | DONE | |
+| 1.4 | POST /boards — create new board with custom columns | Dev | DONE | |
+| 1.5 | POST /cards — add card to a board/column | Dev | DONE | |
+| 1.6 | PUT /cards/:id — update card metadata | Dev | DONE | |
+| 1.7 | POST /cards/move — move card between columns | Dev | DONE | |
+| 1.8 | GET /query — filter by status, tag, due date | Dev | DONE | |
+| 1.9 | User confirmation modal for all write ops | Dev | DONE | modal.ts (ConfirmModal) |
+| 1.10 | Kanban Markdown parser (mgmeyers format) | Dev | DONE | kanban-parser.ts |
 
 ### Phase 2 — Rituals & Advanced Queries
 | # | Task | Owner | Status | Notes |
 |---|------|-------|--------|-------|
-| 2.1 | POST /ritual/standup — daily standup summary | Dev | PENDING | |
-| 2.2 | POST /ritual/review — weekly review report | Dev | PENDING | |
-| 2.3 | GET /query?overdue=true — overdue cards | Dev | PENDING | |
-| 2.4 | GET /query?blocked=true — blocked cards | Dev | PENDING | |
-| 2.5 | Card archival support | Dev | PENDING | |
+| 2.1 | POST /ritual/standup — daily standup summary | Dev | DONE | in kanban-parser.ts |
+| 2.2 | POST /ritual/review — weekly review report | Dev | DONE | in kanban-parser.ts |
+| 2.3 | GET /query?overdue=true — overdue cards | Dev | DONE | |
+| 2.4 | GET /query?blocked=true — blocked cards | Dev | DONE | |
+| 2.5 | Card archival support | Dev | BACKLOG | Deferred — low priority |
 
 ### Phase 3 — Hermes Skills
 | # | Task | Owner | Status | Notes |
 |---|------|-------|--------|-------|
-| 3.1 | Finalize kanban-orchestrator.md skill | Frodo | PENDING | Exists as draft, needs endpoint updates |
-| 3.2 | Write project-breakdown-to-kanban.md skill | Frodo | PENDING | |
-| 3.3 | Write kanban-rituals.md skill | Frodo | PENDING | |
-| 3.4 | Install all 3 skills into Hermes | Gumby | PENDING | |
+| 3.1 | Finalize kanban-orchestrator.md skill | Frodo | DONE | v2.0 with full endpoint docs |
+| 3.2 | Write project-breakdown-to-kanban.md skill | Frodo | DONE | |
+| 3.3 | Write kanban-rituals.md skill | Frodo | DONE | |
+| 3.4 | Install all 3 skills into Hermes | Frodo | DONE | Installed to ~/.hermes/profiles/frodo/skills/productivity/ |
 
 ### Phase 4 — Integration & Testing
 | # | Task | Owner | Status | Notes |
@@ -146,12 +146,12 @@ hermes-kanban/
 ### Phase 5 — CI/CD & Docs
 | # | Task | Owner | Status | Notes |
 |---|------|-------|--------|-------|
-| 5.1 | GitHub Actions: build + lint workflow | Dev | PENDING | |
-| 5.2 | Write README.md | Dev/Frodo | PENDING | |
-| 5.3 | Write API.md (full endpoint reference) | Dev/Frodo | PENDING | |
-| 5.4 | Write SKILLS.md | Frodo | PENDING | |
-| 5.5 | Write install.sh script | Dev | PENDING | |
-| 5.6 | Demo board (docs/demo/) | Frodo | PENDING | |
+| 5.1 | GitHub Actions: build + lint workflow | Dev | DONE | .github/workflows/build.yml |
+| 5.2 | Write README.md | Dev/Frodo | DONE | docs/README.md |
+| 5.3 | Write API.md (full endpoint reference) | Dev/Frodo | DONE | docs/API.md (all 11 endpoints) |
+| 5.4 | Write SKILLS.md | Frodo | DONE | docs/SKILLS.md |
+| 5.5 | Write install.sh script | Dev | DONE | scripts/install.sh |
+| 5.6 | Demo board (docs/demo/) | Frodo | DONE | docs/demo/Q3-Launch.md |
 
 ### Phase 6 — Optional Stretch Goals
 | # | Task | Owner | Status | Notes |
@@ -216,11 +216,16 @@ All write endpoints return `{ ok: true, message: string }` or `{ ok: false, erro
 
 ## Next Immediate Steps
 
-1. Clone https://github.com/GumbyEnder/hermes-kanban into /mnt/nas/agents/projets/hermes-kanban
-2. Bootstrap Obsidian plugin scaffold (npx degit obsidianmd/obsidian-plugin-template plugin/)
-3. Set up tsconfig + esbuild build pipeline
-4. Begin Phase 1: server.ts with /health and /boards endpoints
-5. Confirm: should the plugin use Node's built-in http module or bundle a minimal HTTP library?
+1. **Phase 4 — Integration Testing** (only remaining phase):
+   - Gumby installs plugin in Obsidian (copy plugin/main.js + manifest.json to vault .obsidian/plugins/hermes-kanban-bridge/)
+   - Enable plugin in Obsidian settings
+   - Verify `GET http://localhost:27124/health` returns ok
+   - Ask Hermes to break down a goal into a board (triggers kanban-orchestrator skill)
+   - Run daily standup ritual
+   - Test card move + blocked query
+   - Test fallback: stop plugin, verify Markdown fallback works
+
+2. **Stretch Goal 6.1** (optional): MCP adapter for the plugin
 
 ---
 
