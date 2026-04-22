@@ -117,6 +117,18 @@ export class KanbanServer {
       });
     }
 
+    // Link cards
+    if (method === 'POST' && path === '/cards/link') {
+      return await this.parser.linkCards(body);
+    }
+
+    // Get card links
+    if (method === 'GET' && path === '/cards/links') {
+      const cardId = params.get('cardId');
+      if (!cardId) { const e: any = new Error('cardId query param required'); e.status = 400; throw e; }
+      return await this.parser.getCardLinks(decodeURIComponent(cardId));
+    }
+
     if (method === 'POST' && path === '/ritual/standup') {
       return await this.parser.generateStandup(body);
     }

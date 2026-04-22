@@ -11,6 +11,7 @@ export interface KanbanCard {
   dueDate?: string;
   blocked?: boolean;
   blockerReason?: string;
+  linkedCards?: string[];   // wikilink refs e.g. [[Kanban/OtherBoard::Column::Title]]
   checked: boolean;
 }
 
@@ -225,6 +226,65 @@ export class KanbanParser {
 
   // --- Private helpers ---
 
+  /**
+   * Link two cards across boards. Adds a wikilink on the source card pointing to the target.
+   */
+  async linkCards(body: { fromCardId: string; toCardId: string }): Promise<{ ok: boolean; message?: string; error?: string }> {
+    const [boardId, column, ...titleParts] = body.fromCardId.split('::');
+    const title = titleParts.join('::');
+    const file = this.app.vault.getAbstractFileByPath(normalizePath(boardId));
+    if (!(file instanceof TFile)) return { ok: false, error: `Board not found: ${boardId}` };
+
+    const content = await this.app.vault.read(file);
+    const lines = content.split('\n');
+    let updated = false;
+    let inColumn = false;
+
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith('## ')) inColumn = lines[i].slice(3).trim() === column;
+      if (inColumn && (lines[i].startsWith('- [ ]') || lines[i].startsWith('- [x]'))) {
+        if (this.extractTitleFromLine(lines[i]) === title) {
+          // Append wikilink if not already present
+          if (!lines[i].includes(`[[${body.toCardId}]]`)) {
+            lines[i] += ` | [[${body.toCardId}]]`;
+          }
+          updated = true;
+          break;
+        }
+      }
+    }
+
+    if (!updated) return { ok: false, error: `Card "${title}" not found in "${column}"` };
+    await this.app.vault.modify(file, lines.join('\n'));
+    return { ok: true, message: `Linked "${body.fromCardId}" → "${body.toCardId}"` };
+  }
+
+  /**
+   * Get all linked cards for a given card ID.
+   */
+  async getCardLinks(cardId: string): Promise<{ ok: boolean; links?: string[]; error?: string }> {
+    const [boardId, column, ...titleParts] = cardId.split('::');
+    const title = titleParts.join('::');
+    const file = this.app.vault.getAbstractFileByPath(normalizePath(boardId));
+    if (!(file instanceof TFile)) return { ok: false, error: `Board not found: ${boardId}` };
+
+    const content = await this.app.vault.read(file);
+    const lines = content.split('\n');
+    let inColumn = false;
+
+    for (const line of lines) {
+      if (line.startsWith('## ')) inColumn = line.slice(3).trim() === column;
+      if (inColumn && (line.startsWith('- [ ]') || line.startsWith('- [x]'))) {
+        if (this.extractTitleFromLine(line) === title) {
+          const links = [...line.matchAll(/\[\[([^\]]+)\]\]/g)].map(m => m[1]);
+          return { ok: true, links };
+        }
+      }
+    }
+
+    return { ok: false, error: `Card "${title}" not found` };
+  }
+
   private isKanbanBoard(content: string): boolean {
     return content.includes('## ') &&
       (content.includes('- [ ]') || content.includes('- [x]') || content.includes('%% kanban'));
@@ -251,7 +311,7 @@ export class KanbanParser {
   private parseCardLine(line: string, column: string, boardId: string): KanbanCard {
     const checked = line.startsWith('- [x]');
     const rest = line.replace(/^- \[.\] /, '');
-    const titleMatch = rest.match(/^([^|#@]+)/);
+    const titleMatch = rest.match(/^([^|#@\[]+)/);
     const title = titleMatch ? titleMatch[1].trim() : rest.trim();
     const priorityMatch = rest.match(/#(high|medium|low)/i);
     const priority = (priorityMatch ? priorityMatch[1].toLowerCase() : undefined) as KanbanCard['priority'];
@@ -261,6 +321,7 @@ export class KanbanParser {
     const blockedMatch = rest.match(/blocked:(.+?)(?:\||$)/);
     const blocked = !!blockedMatch;
     const blockerReason = blockedMatch ? blockedMatch[1].trim() : undefined;
+    const linkedMatches = [...rest.matchAll(/\[\[([^\]]+)\]\]/g)].map(m => m[1]);
 
     return {
       id: `${boardId}::${column}::${title}`,
@@ -273,6 +334,7 @@ export class KanbanParser {
       tags: tagMatches.length ? tagMatches : undefined,
       blocked,
       blockerReason,
+      linkedCards: linkedMatches.length ? linkedMatches : undefined,
     };
   }
 
@@ -282,6 +344,7 @@ export class KanbanParser {
     if (card.dueDate) line += ` | due:${card.dueDate}`;
     if (card.tags?.length) line += ` | ${card.tags.map((t: string) => `@${t}`).join(' ')}`;
     if (card.blocked && card.blockerReason) line += ` | blocked:${card.blockerReason}`;
+    if (card.linkedCards?.length) line += ` | ${card.linkedCards.map((l: string) => `[[${l}]]`).join(' ')}`;
     return line;
   }
 
