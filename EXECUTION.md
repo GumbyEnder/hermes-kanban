@@ -156,10 +156,16 @@ hermes-kanban/
 ### Phase 6 — Optional Stretch Goals
 | # | Task | Owner | Status | Notes |
 |---|------|-------|--------|-------|
-| 6.1 | MCP adapter (plugin as MCP server) | Dev | BACKLOG | Lets other MCP-aware clients use it |
-| 6.2 | Multi-board project linking | Dev | BACKLOG | Cards that reference cards on other boards |
-| 6.3 | Recurring card support | Dev | BACKLOG | |
+| 6.1 | MCP adapter (plugin as MCP server) | Dev | DONE | mcp-adapter.ts, port+1, 10 tools, JSON-RPC |
+| 6.2 | Multi-board project linking | Dev | DONE | linkCards(), getCardLinks(), wikilink format |
+| 6.3 | Recurring card support | Dev | DONE | processRecurring(), recur: daily/weekly/monthly |
 | 6.4 | Obsidian mobile compatibility | Dev | BACKLOG | |
+| 6.5 | Card archival — auto-archive Done column | Dev | BACKLOG | |
+| 6.6 | Board templates — pre-built column sets | Dev | BACKLOG | |
+| 6.7 | Due date notifications in Obsidian | Dev | BACKLOG | |
+| 6.8 | Velocity chart — weekly throughput note | Dev | BACKLOG | |
+| 6.9 | BRAT auto-update support | Dev | BACKLOG | |
+| 6.10 | GitHub release packaging | Dev | BACKLOG | |
 
 ---
 
@@ -221,6 +227,7 @@ All write endpoints return `{ ok: true, message: string }` or `{ ok: false, erro
 | 2026-04-22 | Phase 4: plugin live in Obsidian, stretch goals board created end-to-end | Frodo |
 | 2026-04-22 | Docs: README rewritten with full troubleshooting section | Frodo |
 | 2026-04-22 | Stretch goals backlog active in Obsidian Kanban board | Frodo |
+| 2026-04-22 | Stretch 6.1-6.3 complete: MCP adapter, multi-board linking, recurring cards | Frodo |
 
 ---
 
