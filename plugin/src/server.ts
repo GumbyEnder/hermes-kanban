@@ -44,7 +44,7 @@ export class KanbanServer {
       }
     });
 
-    this.server.listen(this.settings.port, '127.0.0.1', () => {
+    this.server.listen(this.settings.port, '0.0.0.0', () => {
       console.log(`Hermes Kanban Bridge listening on port ${this.settings.port}`);
       new Notice(`Hermes Kanban Bridge started on port ${this.settings.port}`);
     });
