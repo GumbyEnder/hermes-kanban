@@ -16,6 +16,10 @@ export default class HermesKanbanPlugin extends Plugin {
       this.server.start();
     }
 
+    if (this.settings.enabled && this.settings.notificationInterval > 0) {
+      this.server.startNotifier(this.settings.notificationInterval);
+    }
+
     if (this.settings.mcpEnabled && this.server) {
       const { KanbanParser } = await import('./kanban-parser');
       const parser = new KanbanParser(this.app);
@@ -59,6 +63,7 @@ export default class HermesKanbanPlugin extends Plugin {
   }
 
   onunload() {
+    this.server?.stopNotifier();
     this.server?.stop();
     this.mcpAdapter?.stop();
     console.log('Hermes Kanban Bridge unloaded');
@@ -132,6 +137,30 @@ class HermesKanbanSettingTab extends PluginSettingTab {
           this.plugin.settings.enabled = value;
           await this.plugin.saveSettings();
           value ? this.plugin.server?.start() : this.plugin.server?.stop();
+          if (value && this.plugin.settings.notificationInterval > 0) {
+            this.plugin.server?.startNotifier(this.plugin.settings.notificationInterval);
+          } else {
+            this.plugin.server?.stopNotifier();
+          }
+        }));
+
+    new Setting(containerEl)
+      .setName('Due date notification interval')
+      .setDesc('Check for overdue cards every N minutes (0 = disabled). Shows an Obsidian notice for each overdue card.')
+      .addText(text => text
+        .setPlaceholder('15')
+        .setValue(String(this.plugin.settings.notificationInterval))
+        .onChange(async (value) => {
+          const minutes = parseInt(value);
+          if (!isNaN(minutes) && minutes >= 0) {
+            this.plugin.settings.notificationInterval = minutes;
+            await this.plugin.saveSettings();
+            if (minutes > 0 && this.plugin.settings.enabled) {
+              this.plugin.server?.startNotifier(minutes);
+            } else {
+              this.plugin.server?.stopNotifier();
+            }
+          }
         }));
 
     new Setting(containerEl)
