@@ -2,17 +2,32 @@ import * as http from 'http';
 import { App, Notice } from 'obsidian';
 import { HermesKanbanSettings } from './settings';
 import { KanbanParser } from './kanban-parser';
+import { DueDateNotifier } from './notification';
 
 export class KanbanServer {
   private server: http.Server | null = null;
   private app: App;
   private settings: HermesKanbanSettings;
   private parser: KanbanParser;
+  notifier: DueDateNotifier | null = null;
+  private notifTimerId: ReturnType<typeof setTimeout> | null = null;
 
   constructor(app: App, settings: HermesKanbanSettings) {
     this.app = app;
     this.settings = settings;
     this.parser = new KanbanParser(app);
+  }
+
+  startNotifier(intervalMinutes?: number): void {
+    const minutes = intervalMinutes ?? this.settings.notificationInterval;
+    if (minutes <= 0) return;
+    this.notifier = new DueDateNotifier(this.app, this.parser, minutes);
+    this.notifier.start(minutes);
+  }
+
+  stopNotifier(): void {
+    this.notifier?.stop();
+    this.notifier = null;
   }
 
   start(): void {
@@ -140,6 +155,23 @@ export class KanbanServer {
 
     if (method === 'POST' && path === '/ritual/review') {
       return await this.parser.generateReview(body);
+    }
+
+    // Due date notifications (6.7)
+    if (method === 'GET' && path === '/notify/due') {
+      if (!this.notifier) { const e: any = new Error('Due date notifications are not enabled'); e.status = 503; throw e; }
+      return await this.notifier.check();
+    }
+
+    // Velocity report (6.8)
+    if (method === 'GET' && path === '/report/velocity') {
+      const weeks = params.get('weeks') ? parseInt(params.get('weeks')!) : 4;
+      return await this.parser.generateVelocityReport(weeks, this.settings.boardFolder);
+    }
+
+    if (method === 'POST' && path === '/ritual/velocity') {
+      const weeks = body.weeks || 4;
+      return await this.parser.generateVelocityReport(weeks, this.settings.boardFolder);
     }
 
     const err: any = new Error(`Not found: ${method} ${path}`);

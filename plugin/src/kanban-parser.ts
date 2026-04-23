@@ -1,4 +1,4 @@
-import { App, TFile, TFolder, normalizePath } from 'obsidian';
+import { App, TFile, TFolder, normalizePath, moment } from 'obsidian';
 
 export interface KanbanCard {
   id: string;
@@ -9,6 +9,7 @@ export interface KanbanCard {
   priority?: 'high' | 'medium' | 'low';
   tags?: string[];
   dueDate?: string;
+  doneDate?: string;       // YYYY-MM-DD when card was marked done
   blocked?: boolean;
   blockerReason?: string;
   linkedCards?: string[];
@@ -371,6 +372,8 @@ export class KanbanParser {
     const dueDateMatch = rest.match(/due:(\d{4}-\d{2}-\d{2})/);
     const dueDate = dueDateMatch ? dueDateMatch[1] : undefined;
     const tagMatches = [...rest.matchAll(/@(\w+)/g)].map(m => m[1]);
+    const doneDateMatch = rest.match(/done:(\d{4}-\d{2}-\d{2})/);
+    const doneDate = doneDateMatch ? doneDateMatch[1] : undefined;
     const blockedMatch = rest.match(/blocked:(.+?)(?:\||$)/);
     const blocked = !!blockedMatch;
     const blockerReason = blockedMatch ? blockedMatch[1].trim() : undefined;
@@ -390,6 +393,7 @@ export class KanbanParser {
       blocked,
       blockerReason,
       linkedCards: linkedMatches.length ? linkedMatches : undefined,
+      doneDate,
       recur,
     };
   }
@@ -450,5 +454,100 @@ export class KanbanParser {
       lines.push(`## ${col}`, ``);
     }
     return lines.join('\n');
+  }
+
+  /**
+   * Generate a velocity (throughput) report: count completed cards per week.
+   * Detects completion by: (1) `done: YYYY-MM-DD` metadata on card line, or
+   * (2) cards in columns whose name contains 'done' or 'completed' (case-insensitive).
+   * Cards with `done:` metadata get date-attributed; cards without it are counted
+   * in the most recent week as "currently done" (approximation).
+   * Writes a markdown note to `{boardFolder}/reports/velocity-YYYY-Www.md`.
+   */
+  async generateVelocityReport(
+    numWeeks: number = 4,
+    boardFolder?: string
+  ): Promise<{ ok: boolean; path?: string; summary?: any; error?: string }> {
+    const result = await this.queryCards({});
+    const now = moment();
+    const weeks: Array<{ weekLabel: string; weekNum: number; completed: number; trend?: string; diff?: number }> = [];
+
+    // Build week buckets
+    for (let i = 0; i < numWeeks; i++) {
+      const weekStart = now.clone().subtract(i + 1, 'weeks').startOf('week');
+      const weekEnd = weekStart.clone().endOf('week');
+      weeks.unshift({ weekLabel: weekStart.format('YYYY-[W]ww'), weekNum: i + 1, completed: 0 });
+    }
+
+    // Count completions per week
+    for (const card of result.cards) {
+      const isDone = card.checked;
+      const isDoneColumn = /^(done|completed|archived)$/i.test(card.column);
+
+      if (card.doneDate && isDone) {
+        // Date-attributed: put in the correct week bucket
+        const doneMoment = moment(card.doneDate, 'YYYY-MM-DD');
+        for (const week of weeks) {
+          const weekStart = moment().subtract(numWeeks - week.weekNum, 'weeks').startOf('week').clone().subtract(now.clone().startOf('week').diff(moment().clone().startOf('week'), 'ms') || 0);
+          // Simpler: rebuild week bounds from label
+          const ws = moment(week.weekLabel, 'YYYY-[W]ww');
+          const we = ws.clone().add(6, 'days').endOf('day');
+          if (doneMoment.isBetween(ws, we, null, '[]')) {
+            week.completed++;
+            break;
+          }
+        }
+      } else if (isDone && isDoneColumn) {
+        // No done date — attribute to most recent week
+        weeks[weeks.length - 1].completed++;
+      }
+    }
+
+    // Calculate trends
+    for (let i = 0; i < weeks.length; i++) {
+      const prev = weeks[i + 1];
+      if (prev) {
+        const diff = weeks[i].completed - prev.completed;
+        weeks[i].trend = diff > 0 ? '▲' : diff < 0 ? '▼' : '→';
+        weeks[i].diff = diff;
+      } else {
+        weeks[i].trend = '—';
+        weeks[i].diff = 0;
+      }
+    }
+
+    const total = weeks.reduce((sum, w) => sum + w.completed, 0);
+    const average = weeks.length > 0 ? Math.round(total / weeks.length) : 0;
+
+    const header = '| Week | Completed | Average | Trend |\n|------|-----------|---------|-------|';
+    const rows = weeks.map(w =>
+      `| ${w.weekLabel} | ${w.completed} | ${average} | ${w.trend ?? '—'} ${w.diff != null && w.diff > 0 ? '+' : ''}${w.diff ?? 0} |`
+    ).join('\n');
+
+    const summary = `**Hermes Kanban Velocity Report**\n\nWeeks: ${numWeeks} | Total Completed: ${total} | Weekly Average: ${average}\n\n${header}\n${rows}`;
+
+    try {
+      const currentWeekLabel = now.format('YYYY-[W]ww');
+      const reportPath = normalizePath(`${boardFolder || 'Kanban'}/reports/velocity-${currentWeekLabel}.md`);
+      await this.app.vault.adapter.mkdir(normalizePath(`${boardFolder || 'Kanban'}/reports`)).catch(() => {});
+
+      let fileContent = summary;
+      try {
+        const existing = await this.app.vault.adapter.read(reportPath);
+        fileContent = existing + '\n\n---\n' + summary;
+      } catch {
+        // File doesn't exist
+      }
+
+      await this.app.vault.adapter.write(reportPath, fileContent);
+
+      return {
+        ok: true,
+        path: reportPath,
+        summary: { numWeeks, total, average, weeks },
+      };
+    } catch (err: any) {
+      return { ok: false, error: err.message || 'Failed to write velocity report' };
+    }
   }
 }
