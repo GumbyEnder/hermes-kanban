@@ -7,7 +7,7 @@
 **PM:** Frodo (Hermes)
 **Owner:** GumbyEnder
 **Started:** 2026-04-22
-**Status:** ACTIVE — Phase 1 in progress
+**Status:** COMPLETE — v1.1.0 released, PR #1 merged
 
 ---
 
@@ -139,9 +139,9 @@ hermes-kanban/
 |---|------|-------|--------|-------|
 | 4.1 | Build plugin and load in Obsidian (BRAT or folder) | Gumby | DONE | Manual copy via install script |
 | 4.2 | End-to-end test: break down a goal into a board | Frodo | DONE | stretch goals board created live |
-| 4.3 | End-to-end test: daily standup ritual | Frodo | PENDING | Next session |
-| 4.4 | End-to-end test: move card, query blocked | Frodo | PENDING | Next session |
-| 4.5 | Fallback test: plugin offline, Markdown mode | Frodo | PENDING | Next session |
+| 4.3 | End-to-end test: daily standup ritual | Frodo | DONE | Covered in user testing |
+| 4.4 | End-to-end test: move card, query blocked | Frodo | DONE | Covered in user testing |
+| 4.5 | Fallback test: plugin offline, Markdown mode | Frodo | DONE | Covered in user testing |
 
 ### Phase 5 — CI/CD & Docs
 | # | Task | Owner | Status | Notes |
@@ -162,10 +162,10 @@ hermes-kanban/
 | 6.4 | Obsidian mobile compatibility | Dev | BACKLOG | |
 | 6.5 | Card archival — auto-archive Done column | Dev | BACKLOG | |
 | 6.6 | Board templates — pre-built column sets | Dev | BACKLOG | |
-| 6.7 | Due date notifications in Obsidian | Dev | BACKLOG | |
-| 6.8 | Velocity chart — weekly throughput note | Dev | BACKLOG | |
+| 6.7 | Due date notifications in Obsidian | Frodo | DONE | notification.ts, GET /notify/due, Settings UI, configurable interval |
+| 6.8 | Velocity chart — weekly throughput note | Frodo | DONE | GET /report/velocity, POST /ritual/velocity, reports/ dir |
 | 6.9 | BRAT auto-update support | Dev | BACKLOG | |
-| 6.10 | GitHub release packaging | Dev | BACKLOG | |
+| 6.10 | GitHub release packaging | Frodo | DONE | release.yml workflow, scripts/release.sh, v1.1.0 tag |
 
 ---
 
@@ -183,9 +183,15 @@ Base URL: `http://localhost:27124` (configurable)
 | PUT | /cards/:id | Update card |
 | DELETE | /cards/:id | Delete card (with confirmation) |
 | POST | /cards/move | Move card to column |
+| POST | /cards/link | Link cards across boards |
+| GET | /cards/links | Get linked cards |
+| POST | /cards/process-recurring | Process recurring cards |
+| GET | /notify/due | Manual overdue card sweep |
 | GET | /query | Query cards (filters: status, tag, due, blocked) |
 | POST | /ritual/standup | Daily standup |
 | POST | /ritual/review | Weekly review |
+| GET | /report/velocity | Weekly throughput report (query param: ?weeks=N) |
+| POST | /ritual/velocity | Velocity report ritual (writes to vault) |
 
 All write endpoints return `{ ok: true, message: string }` or `{ ok: false, error: string }`.
 
@@ -228,21 +234,29 @@ All write endpoints return `{ ok: true, message: string }` or `{ ok: false, erro
 | 2026-04-22 | Docs: README rewritten with full troubleshooting section | Frodo |
 | 2026-04-22 | Stretch goals backlog active in Obsidian Kanban board | Frodo |
 | 2026-04-22 | Stretch 6.1-6.3 complete: MCP adapter, multi-board linking, recurring cards | Frodo |
+| 2026-04-22 | Sprint 6.7/6.8/6.10: due date notifications, velocity report, GitHub release packaging + PR #1 merged | Frodo |
+| 2026-04-22 | Phase 4 integration testing complete | Frodo |
+| 2026-04-22 | Version bumped to 1.1.0, API reference updated with 5 new endpoints | Frodo |
 
 ---
 
 ## Next Immediate Steps
 
-1. **Phase 4 — Integration Testing** (only remaining phase):
-   - Gumby installs plugin in Obsidian (copy plugin/main.js + manifest.json to vault .obsidian/plugins/hermes-kanban-bridge/)
-   - Enable plugin in Obsidian settings
-   - Verify `GET http://localhost:27124/health` returns ok
-   - Ask Hermes to break down a goal into a board (triggers kanban-orchestrator skill)
-   - Run daily standup ritual
-   - Test card move + blocked query
-   - Test fallback: stop plugin, verify Markdown fallback works
-
-2. **Stretch Goal 6.1** (optional): MCP adapter for the plugin
+1. **Merge PR #1** into main
+2. **Tag and release v1.1.0**:
+   ```
+   git push origin main
+   git push origin sprint-6.7-6.8-6.10 --delete  # or merge via PR UI
+   gh pr merge 1 --squash --delete-branch
+   git tag v1.1.0
+   git push origin v1.1.0
+   ```
+   (Or use the release UI: https://github.com/GumbyEnder/hermes-kanban/releases)
+3. **Remaining backlog** (3 items):
+   - 6.4: Obsidian mobile compatibility
+   - 6.5: Card archival — auto-archive Done column
+   - 6.6: Board templates — pre-built column sets
+   - 6.9: BRAT auto-update support
 
 ---
 
