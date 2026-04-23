@@ -550,4 +550,100 @@ export class KanbanParser {
       return { ok: false, error: err.message || 'Failed to write velocity report' };
     }
   }
+
+  /**
+   * Archive done cards from a board into a separate archive file (6.5).
+   * Moves checked/done cards older than maxDays into Kanban/archive/ to keep the active board clean.
+   */
+  async archiveCards(body: {
+    boardId: string;
+    maxDays?: number;
+    archiveFolder?: string;
+  }): Promise<{ ok: boolean; archived?: number; error?: string }> {
+    const maxDays = body.maxDays ?? 7;
+    const archiveFolder = body.archiveFolder ?? 'Kanban/archive';
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - maxDays);
+    const cutoffStr = cutoffDate.toISOString().slice(0, 10);
+
+    const boardResult = await this.getBoard(body.boardId);
+    if (!boardResult.ok || !boardResult.board) return { ok: false, error: boardResult.error };
+
+    const board = boardResult.board;
+    const doneCards = board.cards.filter(c => c.checked && c.column.toLowerCase().includes('done'));
+
+    if (doneCards.length === 0) return { ok: true, archived: 0 };
+
+    // Only archive cards with doneDate older than cutoff
+    const toArchive = doneCards.filter(c => {
+      if (!c.doneDate) return false;
+      return c.doneDate <= cutoffStr;
+    });
+
+    if (toArchive.length === 0) return { ok: true, archived: 0 };
+
+    const boardTitle = board.title.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '-');
+    const archivePath = normalizePath(`${archiveFolder}/${boardTitle}-archive.md`);
+
+    let archiveContent: string;
+    try {
+      archiveContent = await this.app.vault.adapter.read(archivePath);
+    } catch {
+      archiveContent = `---\nkanban-plugin: board\n---\n\n# ${boardTitle} — Archived\n\n## Archived\n\n`;
+    }
+
+    const archivedLines = archiveContent.split('\n');
+    const archiveInsert = toArchive.map(c => {
+      let line = `- [x] ${c.title}`;
+      if (c.priority) line += ` | #${c.priority}`;
+      if (c.dueDate) line += ` | due:${c.dueDate}`;
+      if (c.doneDate) line += ` | done:${c.doneDate}`;
+      if (c.tags?.length) line += ` | ${c.tags.map((t: string) => '@' + t).join(' ')}`;
+      return line;
+    });
+
+    let insertIdx = -1;
+    for (let i = 0; i < archivedLines.length; i++) {
+      if (archivedLines[i] === '## Archived') { insertIdx = i + 1; break; }
+    }
+    if (insertIdx === -1) {
+      archivedLines.push('## Archived');
+      insertIdx = archivedLines.length - 1;
+    }
+
+    for (const line of archiveInsert) {
+      archivedLines.splice(insertIdx, 0, line);
+    }
+
+    await this.app.vault.adapter.mkdir(normalizePath(archiveFolder)).catch(() => {});
+    await this.app.vault.adapter.write(archivePath, archivedLines.join('\n'));
+
+    // Remove archived cards from the active board
+    const file = this.app.vault.getAbstractFileByPath(normalizePath(body.boardId));
+    if (!(file instanceof TFile)) return { ok: false, error: 'Board not found: ' + body.boardId };
+
+    let content = await this.app.vault.read(file);
+    const archivedIds = new Set(toArchive.map(c => c.title));
+    const lines = content.split('\n');
+    let inDone = false;
+    const linesToRemove: number[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith('## ')) {
+        inDone = lines[i].slice(3).trim().toLowerCase().includes('done');
+      }
+      if (inDone && (lines[i].startsWith('- [ ]') || lines[i].startsWith('- [x]'))) {
+        if (archivedIds.has(this.extractTitleFromLine(lines[i]))) {
+          linesToRemove.push(i);
+        }
+      }
+    }
+
+    for (const idx of linesToRemove.reverse()) {
+      lines.splice(idx, 1);
+    }
+    await this.app.vault.modify(file, lines.join('\n'));
+
+    return { ok: true, archived: toArchive.length };
+  }
 }
