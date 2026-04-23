@@ -35,12 +35,33 @@ jobs:
           mkdir -p dist
           VERSION=$(node -p "require('./plugin/package.json').version")
           cd plugin
-          zip ../dist/hermes-kanban-bridge-${VERSION}.zip main.js manifest.json styles.css 2>/dev/null || zip ../dist/hermes-kanban-bridge-${VERSION}.zip main.js manifest.json
+          zip ../dist/hermes-kanban-bridge-${VERSION}.zip main.js manifest.json versions.json 2>/dev/null || zip ../dist/hermes-kanban-bridge-${VERSION}.zip main.js manifest.json versions.json
+
+      - name: Generate updates.json (BRAT)
+        run: |
+          VERSION=$(node -p "require('./plugin/package.json').version")
+          # Read existing updates.json from releases or create new
+          if gh release view "v${VERSION}" --json assets --jq '.assets[].name' 2>/dev/null | grep -q updates.json; then
+            gh release download "v${VERSION}" --pattern updates.json 2>/dev/null || true
+          fi
+          if [ -f updates.json ]; then
+            python3 -c "
+            import json, sys
+            with open('updates.json') as f: data = json.load(f)
+            data['${VERSION}'] = '1.4.0'
+            with open('updates.json', 'w') as f: json.dump(data, f, indent=2)
+            "
+          else
+            echo '{\"${VERSION}\": \"1.4.0\"}' | python3 -m json.tool > updates.json
+          fi
+          cat updates.json
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.zip
+          files: |
+            dist/*.zip
+            plugin/updates.json
           generate_release_notes: true
           draft: false
           prerelease: false

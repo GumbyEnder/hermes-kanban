@@ -4,6 +4,30 @@ import { HermesKanbanSettings } from './settings';
 import { KanbanParser } from './kanban-parser';
 import { DueDateNotifier } from './notification';
 
+/** Board templates (6.6) — pre-built column sets for common workflows */
+const BOARD_TEMPLATES: Record<string, { columns: string[]; description: string }> = {
+  default: {
+    columns: ['Backlog', 'To Do', 'In Progress', 'Review', 'Done'],
+    description: 'Standard kanban workflow',
+  },
+  sprint: {
+    columns: ['Backlog', 'Sprint Backlog', 'In Progress', 'Code Review', 'Done'],
+    description: 'Agile sprint with code review column',
+  },
+  'bug-triage': {
+    columns: ['Reported', 'Triaged', 'In Progress', 'QA Testing', 'Closed'],
+    description: 'Bug triage and resolution workflow',
+  },
+  release: {
+    columns: ['Planned', 'Ready', 'In Progress', 'Staging', 'Released'],
+    description: 'Release pipeline tracking',
+  },
+  personal: {
+    columns: ['Inbox', 'Today', 'This Week', 'Waiting', 'Done'],
+    description: 'Personal productivity / GTD-lite',
+  },
+};
+
 export class KanbanServer {
   private server: http.Server | null = null;
   private app: App;
@@ -172,6 +196,41 @@ export class KanbanServer {
     if (method === 'POST' && path === '/ritual/velocity') {
       const weeks = body.weeks || 4;
       return await this.parser.generateVelocityReport(weeks, this.settings.boardFolder);
+    }
+
+    // Card archival (6.5)
+    if (method === 'POST' && path === '/cards/archive') {
+      return await this.parser.archiveCards(body);
+    }
+
+    // Board templates (6.6) — GET /templates lists available templates
+    if (method === 'GET' && path === '/templates') {
+      return { ok: true, templates: Object.fromEntries(
+        Object.entries(BOARD_TEMPLATES).map(([k, v]) => [k, { columns: v.columns, description: v.description }])
+      )};
+    }
+
+    if (method === 'GET' && path.startsWith('/templates/')) {
+      const name = path.slice('/templates/'.length);
+      const template = BOARD_TEMPLATES[name];
+      if (!template) { const e: any = new Error(`Unknown template: ${name}`); e.status = 404; throw e; }
+      return { ok: true, template: { name, columns: template.columns, description: template.description } };
+    }
+
+    // Board creation from template (6.6)
+    if (method === 'POST' && path === '/templates/apply') {
+      const template = BOARD_TEMPLATES[body.template];
+      if (!template) { const e: any = new Error(`Unknown template: ${body.template}`); e.status = 404; throw e; }
+      const boardBody = { title: body.title, columns: template.columns, boardFolder: body.boardFolder };
+      return await this.parser.createBoard(boardBody as any, this.settings.boardFolder);
+    }
+
+    // Create board with template from POST /boards
+    if (method === 'POST' && path === '/boards' && body.template) {
+      const template = BOARD_TEMPLATES[body.template];
+      if (!template) { const e: any = new Error(`Unknown template: ${body.template}`); e.status = 404; throw e; }
+      const boardBody = { title: body.title, columns: template.columns, boardFolder: body.boardFolder };
+      return await this.parser.createBoard(boardBody as any, this.settings.boardFolder);
     }
 
     const err: any = new Error(`Not found: ${method} ${path}`);
