@@ -242,17 +242,13 @@ All write endpoints return `{ ok: true, message: string }` or `{ ok: false, erro
 
 ## Next Immediate Steps
 
-1. **Merge PR #1** into main
-2. **Tag and release v1.1.0**:
-   ```
-   git push origin main
-   git push origin sprint-6.7-6.8-6.10 --delete  # or merge via PR UI
-   gh pr merge 1 --squash --delete-branch
-   git tag v1.1.0
-   git push origin v1.1.0
-   ```
-   (Or use the release UI: https://github.com/GumbyEnder/hermes-kanban/releases)
-3. **Remaining backlog** (3 items):
+1. **PR #1 merged** into main ✅
+2. **v1.1.0 released**: 
+   - Tag `v1.1.0` on main (commit 3ce6c75)
+   - Release at https://github.com/GumbyEnder/hermes-kanban/releases/tag/v1.1.0
+   - Download: hermes-kanban-bridge-1.1.0.zip (10.5 KB)
+   - GitHub Actions release workflow has a token permission issue for auto-publish — release was created manually via `gh release` as fallback
+3. **Remaining backlog** (4 items):
    - 6.4: Obsidian mobile compatibility
    - 6.5: Card archival — auto-archive Done column
    - 6.6: Board templates — pre-built column sets
