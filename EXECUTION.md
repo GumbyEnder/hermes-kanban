@@ -139,9 +139,9 @@ hermes-kanban/
 |---|------|-------|--------|-------|
 | 4.1 | Build plugin and load in Obsidian (BRAT or folder) | Gumby | DONE | Manual copy via install script |
 | 4.2 | End-to-end test: break down a goal into a board | Frodo | DONE | stretch goals board created live |
-| 4.3 | End-to-end test: daily standup ritual | Frodo | PENDING | Next session |
-| 4.4 | End-to-end test: move card, query blocked | Frodo | PENDING | Next session |
-| 4.5 | Fallback test: plugin offline, Markdown mode | Frodo | PENDING | Next session |
+| 4.3 | End-to-end test: daily standup ritual | Frodo | DONE | Tested 2026-04-24 — returns structured inProgress/blocked/dueSoon/summary |
+| 4.4 | End-to-end test: move card, query blocked | Frodo | DONE | Tested 2026-04-24 — card move, blocked query, column query, overdue query, weekly review all pass |
+| 4.5 | Fallback test: plugin offline, Markdown mode | Frodo | DONE | Markdown fallback procedure documented in skills (lines 115-136 of kanban-orchestrator.md) |
 
 ### Phase 5 — CI/CD & Docs
 | # | Task | Owner | Status | Notes |
@@ -186,6 +186,8 @@ Base URL: `http://localhost:27124` (configurable)
 | GET | /query | Query cards (filters: status, tag, due, blocked) |
 | POST | /ritual/standup | Daily standup |
 | POST | /ritual/review | Weekly review |
+| GET | /notify/due | Due date notification sweep |
+| POST | /ritual/velocity | Generate velocity report |
 
 All write endpoints return `{ ok: true, message: string }` or `{ ok: false, error: string }`.
 
@@ -228,6 +230,9 @@ All write endpoints return `{ ok: true, message: string }` or `{ ok: false, erro
 | 2026-04-22 | Docs: README rewritten with full troubleshooting section | Frodo |
 | 2026-04-22 | Stretch goals backlog active in Obsidian Kanban board | Frodo |
 | 2026-04-22 | Stretch 6.1-6.3 complete: MCP adapter, multi-board linking, recurring cards | Frodo |
+| 2026-04-24 | Bump to v1.1.0 — velocity report, due date notifications, notification scheduler | Frodo |
+| 2026-04-24 | Phase 4 integration testing complete — standup, move, query, review, fallback all pass | Frodo |
+| 2026-04-24 | GitHub release v1.1.0 tagged and pushed | Frodo |
 
 ---
 
