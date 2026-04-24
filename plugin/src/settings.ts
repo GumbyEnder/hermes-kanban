@@ -12,6 +12,10 @@ export interface HermesKanbanSettings {
   githubProjectId: number;
   syncIssues: 'off' | 'push' | 'pull' | 'bidirectional';
   syncProjects: 'off' | 'push' | 'pull' | 'bidirectional';
+  // Card archival
+  archiveEnabled: boolean;
+  archiveDays: number;
+  archiveFilePath: string;
 }
 
 export const DEFAULT_SETTINGS: HermesKanbanSettings = {
@@ -27,4 +31,7 @@ export const DEFAULT_SETTINGS: HermesKanbanSettings = {
   githubProjectId: 0,
   syncIssues: 'off',
   syncProjects: 'off',
+  archiveEnabled: false,
+  archiveDays: 30,
+  archiveFilePath: 'Kanban/archive.md',
 };

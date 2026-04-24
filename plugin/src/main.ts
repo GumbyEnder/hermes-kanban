@@ -4,7 +4,7 @@ import { KanbanServer } from './server';
 import { McpAdapter } from './mcp-adapter';
 
 // Keep this in sync with manifest.json and package.json version
-export const PLUGIN_VERSION = '1.4.0';
+export const PLUGIN_VERSION = '1.5.0';
 
 export default class HermesKanbanPlugin extends Plugin {
   settings: HermesKanbanSettings = DEFAULT_SETTINGS;

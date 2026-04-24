@@ -541,6 +541,137 @@ kanban-plugin: board
         }
         return lines.join("\n");
       }
+      /**
+       * Archive done/completed cards older than the specified number of days.
+       * Moves them from the source board to an archive.md file.
+       */
+      async archiveCards(boardFolder, archiveFilePath, archiveDays) {
+        const today = /* @__PURE__ */ new Date();
+        const cutoffDate = new Date(today.getTime() - archiveDays * 864e5);
+        const cutoffStr = cutoffDate.toISOString().slice(0, 10);
+        const archiveDate = today.toISOString().slice(0, 10);
+        const normalizedArchivePath = (0, import_obsidian.normalizePath)(archiveFilePath);
+        const result = await this.queryCards({});
+        const doneCards = result.cards.filter((c) => {
+          const colLower = c.column.toLowerCase();
+          return colLower.includes("done") || colLower.includes("completed");
+        });
+        const toArchive = [];
+        for (const card of doneCards) {
+          let dateStr = card.completed;
+          if (!dateStr) {
+            dateStr = archiveDate;
+          }
+          if (dateStr < cutoffStr) {
+            toArchive.push(card);
+          }
+        }
+        if (toArchive.length === 0) {
+          return { ok: true, archived: 0, details: [] };
+        }
+        let existingContent = "";
+        const archiveFile = this.app.vault.getAbstractFileByPath(normalizedArchivePath);
+        if (archiveFile instanceof import_obsidian.TFile) {
+          existingContent = await this.app.vault.read(archiveFile);
+        }
+        const archiveEntries = this.buildArchiveEntries(toArchive, archiveDate);
+        let newContent;
+        if (existingContent && existingContent.trim()) {
+          if (existingContent.includes("</cards>")) {
+            const parts = existingContent.split("</cards>");
+            newContent = parts.slice(0, -1).join("</cards>") + archiveEntries + "</cards>";
+          } else {
+            newContent = existingContent.trimEnd() + "\n\n" + archiveEntries;
+          }
+        } else {
+          newContent = this.buildArchiveMarkdown(archiveEntries);
+        }
+        const archiveDir = normalizedArchivePath.substring(0, normalizedArchivePath.lastIndexOf("/"));
+        await this.app.vault.adapter.mkdir((0, import_obsidian.normalizePath)(archiveDir || ".")).catch(() => {
+        });
+        if (archiveFile instanceof import_obsidian.TFile) {
+          await this.app.vault.modify(archiveFile, newContent);
+        } else {
+          await this.app.vault.create(normalizedArchivePath, newContent);
+        }
+        const details = [];
+        for (const card of toArchive) {
+          const file = this.app.vault.getAbstractFileByPath((0, import_obsidian.normalizePath)(card.boardId));
+          if (!(file instanceof import_obsidian.TFile))
+            continue;
+          const content = await this.app.vault.read(file);
+          const lines = content.split("\n");
+          let inColumn = false;
+          let found = false;
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].startsWith("## ")) {
+              inColumn = lines[i].slice(3).trim() === card.column;
+            }
+            if (inColumn && (lines[i].startsWith("- [ ]") || lines[i].startsWith("- [x]"))) {
+              if (this.extractTitleFromLine(lines[i]) === card.title) {
+                lines.splice(i, 1);
+                found = true;
+                details.push(`Archived "${card.title}" from "${card.boardId}"`);
+                break;
+              }
+            }
+          }
+          if (found) {
+            await this.app.vault.modify(file, lines.join("\n"));
+          }
+        }
+        return { ok: true, archived: toArchive.length, details };
+      }
+      /**
+       * Build archive entries as Markdown sections, grouped by board.
+       */
+      buildArchiveEntries(cards, archiveDate) {
+        var _a, _b;
+        const grouped = /* @__PURE__ */ new Map();
+        for (const card of cards) {
+          const boardName = ((_a = card.boardId.split("/").pop()) == null ? void 0 : _a.replace(".md", "")) || card.boardId;
+          if (!grouped.has(boardName))
+            grouped.set(boardName, []);
+          grouped.get(boardName).push(card);
+        }
+        let entries = "";
+        for (const [boardName, boardCards] of grouped) {
+          entries += `
+## Board: ${boardName}
+
+`;
+          for (const card of boardCards) {
+            entries += `### \u2705 ${card.title}
+`;
+            if (card.completed)
+              entries += `- completed: ${card.completed}
+`;
+            if (card.priority)
+              entries += `- #${card.priority}
+`;
+            if ((_b = card.tags) == null ? void 0 : _b.length)
+              entries += `- ${card.tags.map((t) => `@${t}`).join(" ")}
+`;
+            entries += `</cards>
+
+`;
+          }
+        }
+        return entries;
+      }
+      /**
+       * Build the full archive.md content with frontmatter.
+       */
+      buildArchiveMarkdown(entries) {
+        const archiveDate = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+        return `---
+kanban-plugin: archived
+---
+
+# Archived Cards
+Archive date: ${archiveDate}
+${entries}`;
+      }
     };
   }
 });
@@ -567,7 +698,10 @@ var DEFAULT_SETTINGS = {
   githubRepo: "",
   githubProjectId: 0,
   syncIssues: "off",
-  syncProjects: "off"
+  syncProjects: "off",
+  archiveEnabled: false,
+  archiveDays: 30,
+  archiveFilePath: "Kanban/archive.md"
 };
 
 // src/server.ts
@@ -600,7 +734,25 @@ async function checkDueDateNotifications(app, settings, parser, notifiedIds) {
       board: ((_a2 = c.boardId.split("/").pop()) == null ? void 0 : _a2.replace(".md", "")) || c.boardId
     };
   });
-  return { overdue: overdueWithBoard, notified: notifiedCardIds };
+  const result = {
+    overdue: overdueWithBoard,
+    notified: notifiedCardIds
+  };
+  if (settings.archiveEnabled) {
+    try {
+      const archiveResult = await parser.archiveCards(
+        settings.boardFolder,
+        settings.archiveFilePath,
+        settings.archiveDays
+      );
+      if (archiveResult.archived > 0) {
+        result.archived = { archived: archiveResult.archived, details: archiveResult.details };
+      }
+    } catch (err) {
+      console.error("Error during auto-archive:", err);
+    }
+  }
+  return result;
 }
 function startNotificationScheduler(app, settings, parser, notifiedIds) {
   checkDueDateNotifications(app, settings, parser, notifiedIds).catch((err) => {
@@ -617,6 +769,29 @@ function startNotificationScheduler(app, settings, parser, notifiedIds) {
   }
   return () => {
   };
+}
+
+// src/templates.ts
+var BOARD_TEMPLATES = [
+  {
+    name: "sprint",
+    columns: ["Backlog", "To Do", "In Progress", "Review", "Done", "Blocked"]
+  },
+  {
+    name: "bug-triage",
+    columns: ["Reported", "Triage", "In Progress", "Testing", "Released"]
+  },
+  {
+    name: "release",
+    columns: ["Backlog", "In Progress", "Staged", "Deployed", "Verified"]
+  },
+  {
+    name: "personal",
+    columns: ["Ideas", "To Do", "In Progress", "Done"]
+  }
+];
+function getTemplate(name) {
+  return BOARD_TEMPLATES.find((t) => t.name === name);
 }
 
 // src/server.ts
@@ -767,6 +942,40 @@ var KanbanServer = class {
     const err = new Error(`Not found: ${method} ${path}`);
     err.status = 404;
     throw err;
+    if (method === "POST" && path === "/cards/archive") {
+      if (!this.settings.archiveEnabled) {
+        const e = new Error("Card archival is not enabled. Enable archiveEnabled in settings.");
+        e.status = 400;
+        throw e;
+      }
+      return await this.parser.archiveCards(
+        this.settings.boardFolder,
+        this.settings.archiveFilePath,
+        this.settings.archiveDays
+      );
+    }
+    if (method === "POST" && path === "/templates") {
+      return await this.createBoardFromTemplate(body);
+    }
+  }
+  /**
+   * Create a board from a preset template.
+   * Body: { template: string, boardTitle: string }
+   */
+  async createBoardFromTemplate(body) {
+    if (!body.template || !body.boardTitle) {
+      const e = new Error('Body requires "template" (template name) and "boardTitle"');
+      e.status = 400;
+      throw e;
+    }
+    const template = getTemplate(body.template);
+    if (!template) {
+      const e = new Error(`Template "${body.template}" not found. Available: ${["sprint", "bug-triage", "release", "personal"].join(", ")}`);
+      e.status = 404;
+      throw e;
+    }
+    await this.parser.createBoard({ title: body.boardTitle, columns: template.columns }, this.settings.boardFolder);
+    return { ok: true, path: `${this.settings.boardFolder}/${body.boardTitle}.md` };
   }
 };
 
@@ -1010,7 +1219,7 @@ var McpAdapter = class {
 };
 
 // src/main.ts
-var PLUGIN_VERSION = "1.4.0";
+var PLUGIN_VERSION = "1.5.0";
 var HermesKanbanPlugin = class extends import_obsidian5.Plugin {
   constructor() {
     super(...arguments);
