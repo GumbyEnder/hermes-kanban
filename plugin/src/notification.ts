@@ -1,75 +1,69 @@
-import { App, Notice } from 'obsidian';
+import { App, Notice, normalizePath } from 'obsidian';
 import { KanbanParser } from './kanban-parser';
+import { HermesKanbanSettings } from './settings';
 
 /**
- * Due date notification manager.
- * Scans all kanban boards for overdue cards and shows Obsidian Notice() banners.
- * Deduplicates: only notifies once per card per session.
+ * Check all kanban boards for overdue cards and show Obsidian notices.
+ * Deduplicates per session — each card ID is notified at most once.
  */
-export class DueDateNotifier {
-  private app: App;
-  private parser: KanbanParser;
-  private notifiedCardIds: Set<string> = new Set();
-  private timerId: ReturnType<typeof setInterval> | null = null;
-  private intervalMinutes: number = 15;
+export async function checkDueDateNotifications(
+  app: App,
+  settings: HermesKanbanSettings,
+  parser: KanbanParser,
+  notifiedIds: Set<string>,
+): Promise<{ overdue: Array<{ cardId: string; title: string; dueDate: string; board: string }>; notified: string[] }> {
+  const today = new Date().toISOString().slice(0, 10);
+  const queryResult = await parser.queryCards({ overdue: true });
+  const overdue = queryResult.cards;
 
-  constructor(app: App, parser: KanbanParser, intervalMinutes: number = 15) {
-    this.app = app;
-    this.parser = parser;
-    this.intervalMinutes = intervalMinutes;
+  const notifiedCardIds: string[] = [];
+
+  for (const card of overdue) {
+    if (notifiedIds.has(card.id)) continue;
+    notifiedIds.add(card.id);
+    notifiedCardIds.push(card.id);
+
+    // Extract board name from path
+    const boardName = card.boardId.split('/').pop()?.replace('.md', '') || card.boardId;
+    new Notice(`Card "${card.title}" in board "${boardName}" is overdue`);
   }
 
-  /** Start periodic checking. If intervalMinutes is 0, does nothing. */
-  start(intervalMinutes?: number): void {
-    this.intervalMinutes = intervalMinutes ?? this.intervalMinutes;
-    this.stop();
-    this.notifiedCardIds.clear();
+  const overdueWithBoard = overdue.map(c => ({
+    cardId: c.id,
+    title: c.title,
+    dueDate: c.dueDate!,
+    board: c.boardId.split('/').pop()?.replace('.md', '') || c.boardId,
+  }));
 
-    if (this.intervalMinutes <= 0) return;
+  return { overdue: overdueWithBoard, notified: notifiedCardIds };
+}
 
-    // Run immediately on start
-    this.check();
+/**
+ * Start the due-date notification scheduler. Returns a cleanup function.
+ */
+export function startNotificationScheduler(
+  app: App,
+  settings: HermesKanbanSettings,
+  parser: KanbanParser,
+  notifiedIds: Set<string>,
+): () => void {
+  // Run immediately on startup
+  checkDueDateNotifications(app, settings, parser, notifiedIds).catch(err => {
+    console.error('Error checking due date notifications:', err);
+  });
 
-    this.timerId = setInterval(() => this.check(), this.intervalMinutes * 60 * 1000);
+  // Set up interval if notificationInterval > 0
+  if (settings.notificationInterval > 0) {
+    const intervalMs = settings.notificationInterval * 60 * 1000;
+    const intervalId = setInterval(() => {
+      checkDueDateNotifications(app, settings, parser, notifiedIds).catch(err => {
+        console.error('Error checking due date notifications:', err);
+      });
+    }, intervalMs);
+
+    return () => clearInterval(intervalId);
   }
 
-  /** Stop periodic checking. */
-  stop(): void {
-    if (this.timerId) {
-      clearInterval(this.timerId);
-      this.timerId = null;
-    }
-  }
-
-  /** Manually trigger a due date sweep. Returns overdue cards and which were newly notified. */
-  async check(): Promise<{ overdue: Array<{ id: string; title: string; boardId: string; dueDate: string }>; notified: string[] }> {
-    const result = await this.parser.queryCards({ overdue: true });
-    const overdue = result.cards.map(c => ({
-      id: c.id,
-      title: c.title,
-      boardId: c.boardId,
-      dueDate: c.dueDate!,
-    }));
-
-    const newlyNotified: string[] = [];
-    for (const card of overdue) {
-      if (!this.notifiedCardIds.has(card.id)) {
-        this.notifiedCardIds.add(card.id);
-        newlyNotified.push(card.id);
-        new Notice(`⚠️ Card "${card.title}" is overdue (was due: ${card.dueDate})`);
-      }
-    }
-
-    return { overdue, notified: newlyNotified };
-  }
-
-  /** Get count of already-notified cards (useful for settings display). */
-  getNotifiedCount(): number {
-    return this.notifiedCardIds.size;
-  }
-
-  /** Clear notification history (useful for "remind me again"). */
-  reset(): void {
-    this.notifiedCardIds.clear();
-  }
+  // Return no-op cleanup if disabled
+  return () => {};
 }

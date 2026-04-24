@@ -2,56 +2,21 @@ import * as http from 'http';
 import { App, Notice } from 'obsidian';
 import { HermesKanbanSettings } from './settings';
 import { KanbanParser } from './kanban-parser';
-import { DueDateNotifier } from './notification';
-
-/** Board templates (6.6) — pre-built column sets for common workflows */
-const BOARD_TEMPLATES: Record<string, { columns: string[]; description: string }> = {
-  default: {
-    columns: ['Backlog', 'To Do', 'In Progress', 'Review', 'Done'],
-    description: 'Standard kanban workflow',
-  },
-  sprint: {
-    columns: ['Backlog', 'Sprint Backlog', 'In Progress', 'Code Review', 'Done'],
-    description: 'Agile sprint with code review column',
-  },
-  'bug-triage': {
-    columns: ['Reported', 'Triaged', 'In Progress', 'QA Testing', 'Closed'],
-    description: 'Bug triage and resolution workflow',
-  },
-  release: {
-    columns: ['Planned', 'Ready', 'In Progress', 'Staging', 'Released'],
-    description: 'Release pipeline tracking',
-  },
-  personal: {
-    columns: ['Inbox', 'Today', 'This Week', 'Waiting', 'Done'],
-    description: 'Personal productivity / GTD-lite',
-  },
-};
+import { checkDueDateNotifications, startNotificationScheduler } from './notification';
+import { PLUGIN_VERSION } from './main';
 
 export class KanbanServer {
   private server: http.Server | null = null;
   private app: App;
   private settings: HermesKanbanSettings;
   private parser: KanbanParser;
-  notifier: DueDateNotifier | null = null;
-  private notifTimerId: ReturnType<typeof setTimeout> | null = null;
+  private notifiedIds: Set<string> = new Set();
+  private stopNotifications: () => void = () => {};
 
   constructor(app: App, settings: HermesKanbanSettings) {
     this.app = app;
     this.settings = settings;
     this.parser = new KanbanParser(app);
-  }
-
-  startNotifier(intervalMinutes?: number): void {
-    const minutes = intervalMinutes ?? this.settings.notificationInterval;
-    if (minutes <= 0) return;
-    this.notifier = new DueDateNotifier(this.app, this.parser, minutes);
-    this.notifier.start(minutes);
-  }
-
-  stopNotifier(): void {
-    this.notifier?.stop();
-    this.notifier = null;
   }
 
   start(): void {
@@ -88,6 +53,14 @@ export class KanbanServer {
       new Notice(`Hermes Kanban Bridge started on port ${this.settings.port}`);
     });
 
+    // Start due date notification scheduler
+    this.stopNotifications = startNotificationScheduler(
+      this.app,
+      this.settings,
+      this.parser,
+      this.notifiedIds,
+    );
+
     this.server.on('error', (err: any) => {
       if (err.code === 'EADDRINUSE') {
         new Notice(`Hermes Kanban Bridge: port ${this.settings.port} already in use. Change port in settings.`);
@@ -100,6 +73,7 @@ export class KanbanServer {
     if (this.server) {
       this.server.close();
       this.server = null;
+      this.stopNotifications();
       console.log('Hermes Kanban Bridge stopped');
     }
   }
@@ -117,7 +91,7 @@ export class KanbanServer {
 
   private async route(method: string, path: string, params: URLSearchParams, body: any): Promise<any> {
     if (method === 'GET' && path === '/health') {
-      return { ok: true, status: 'running', port: this.settings.port, version: '1.0.0' };
+      return { ok: true, status: 'running', port: this.settings.port, version: PLUGIN_VERSION };
     }
 
     if (method === 'GET' && path === '/boards') {
@@ -181,56 +155,27 @@ export class KanbanServer {
       return await this.parser.generateReview(body);
     }
 
-    // Due date notifications (6.7)
+    // Due date notifications — manual sweep
     if (method === 'GET' && path === '/notify/due') {
-      if (!this.notifier) { const e: any = new Error('Due date notifications are not enabled'); e.status = 503; throw e; }
-      return await this.notifier.check();
+      const result = await checkDueDateNotifications(
+        this.app,
+        this.settings,
+        this.parser,
+        this.notifiedIds,
+      );
+      return { ok: true, ...result };
     }
 
-    // Velocity report (6.8)
+    // Velocity report — read-only GET
     if (method === 'GET' && path === '/report/velocity') {
-      const weeks = params.get('weeks') ? parseInt(params.get('weeks')!) : 4;
-      return await this.parser.generateVelocityReport(weeks, this.settings.boardFolder);
+      const weeks = parseInt(params.get('weeks') || '4', 10);
+      return await this.parser.generateVelocityReport(this.settings.boardFolder, weeks);
     }
 
+    // Velocity report — ritual POST (alias that writes automatically)
     if (method === 'POST' && path === '/ritual/velocity') {
-      const weeks = body.weeks || 4;
-      return await this.parser.generateVelocityReport(weeks, this.settings.boardFolder);
-    }
-
-    // Card archival (6.5)
-    if (method === 'POST' && path === '/cards/archive') {
-      return await this.parser.archiveCards(body);
-    }
-
-    // Board templates (6.6) — GET /templates lists available templates
-    if (method === 'GET' && path === '/templates') {
-      return { ok: true, templates: Object.fromEntries(
-        Object.entries(BOARD_TEMPLATES).map(([k, v]) => [k, { columns: v.columns, description: v.description }])
-      )};
-    }
-
-    if (method === 'GET' && path.startsWith('/templates/')) {
-      const name = path.slice('/templates/'.length);
-      const template = BOARD_TEMPLATES[name];
-      if (!template) { const e: any = new Error(`Unknown template: ${name}`); e.status = 404; throw e; }
-      return { ok: true, template: { name, columns: template.columns, description: template.description } };
-    }
-
-    // Board creation from template (6.6)
-    if (method === 'POST' && path === '/templates/apply') {
-      const template = BOARD_TEMPLATES[body.template];
-      if (!template) { const e: any = new Error(`Unknown template: ${body.template}`); e.status = 404; throw e; }
-      const boardBody = { title: body.title, columns: template.columns, boardFolder: body.boardFolder };
-      return await this.parser.createBoard(boardBody as any, this.settings.boardFolder);
-    }
-
-    // Create board with template from POST /boards
-    if (method === 'POST' && path === '/boards' && body.template) {
-      const template = BOARD_TEMPLATES[body.template];
-      if (!template) { const e: any = new Error(`Unknown template: ${body.template}`); e.status = 404; throw e; }
-      const boardBody = { title: body.title, columns: template.columns, boardFolder: body.boardFolder };
-      return await this.parser.createBoard(boardBody as any, this.settings.boardFolder);
+      const weeks = body?.weeks ? parseInt(String(body.weeks), 10) : 4;
+      return await this.parser.generateVelocityReport(this.settings.boardFolder, weeks);
     }
 
     const err: any = new Error(`Not found: ${method} ${path}`);
