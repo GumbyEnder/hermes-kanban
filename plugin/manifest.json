@@ -1,7 +1,7 @@
 {
   "id": "hermes-kanban-bridge",
   "name": "Hermes Kanban Bridge",
-  "version": "1.1.0",
+  "version": "1.3.0",
   "minAppVersion": "1.4.0",
   "description": "REST API bridge for Hermes AI agent — control Kanban boards programmatically",
   "author": "GumbyEnder",
