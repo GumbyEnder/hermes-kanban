@@ -1004,7 +1004,7 @@ var McpAdapter = class {
 };
 
 // src/main.ts
-var PLUGIN_VERSION = "1.1.0";
+var PLUGIN_VERSION = "1.3.0";
 var HermesKanbanPlugin = class extends import_obsidian5.Plugin {
   constructor() {
     super(...arguments);
