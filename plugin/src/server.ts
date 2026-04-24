@@ -2,12 +2,15 @@ import * as http from 'http';
 import { App, Notice } from 'obsidian';
 import { HermesKanbanSettings } from './settings';
 import { KanbanParser } from './kanban-parser';
+import { checkDueDateNotifications, startNotificationScheduler } from './notification';
 
 export class KanbanServer {
   private server: http.Server | null = null;
   private app: App;
   private settings: HermesKanbanSettings;
   private parser: KanbanParser;
+  private notifiedIds: Set<string> = new Set();
+  private stopNotifications: () => void = () => {};
 
   constructor(app: App, settings: HermesKanbanSettings) {
     this.app = app;
@@ -49,6 +52,14 @@ export class KanbanServer {
       new Notice(`Hermes Kanban Bridge started on port ${this.settings.port}`);
     });
 
+    // Start due date notification scheduler
+    this.stopNotifications = startNotificationScheduler(
+      this.app,
+      this.settings,
+      this.parser,
+      this.notifiedIds,
+    );
+
     this.server.on('error', (err: any) => {
       if (err.code === 'EADDRINUSE') {
         new Notice(`Hermes Kanban Bridge: port ${this.settings.port} already in use. Change port in settings.`);
@@ -61,6 +72,7 @@ export class KanbanServer {
     if (this.server) {
       this.server.close();
       this.server = null;
+      this.stopNotifications();
       console.log('Hermes Kanban Bridge stopped');
     }
   }
@@ -140,6 +152,29 @@ export class KanbanServer {
 
     if (method === 'POST' && path === '/ritual/review') {
       return await this.parser.generateReview(body);
+    }
+
+    // Due date notifications — manual sweep
+    if (method === 'GET' && path === '/notify/due') {
+      const result = await checkDueDateNotifications(
+        this.app,
+        this.settings,
+        this.parser,
+        this.notifiedIds,
+      );
+      return { ok: true, ...result };
+    }
+
+    // Velocity report — read-only GET
+    if (method === 'GET' && path === '/report/velocity') {
+      const weeks = parseInt(params.get('weeks') || '4', 10);
+      return await this.parser.generateVelocityReport(this.settings.boardFolder, weeks);
+    }
+
+    // Velocity report — ritual POST (alias that writes automatically)
+    if (method === 'POST' && path === '/ritual/velocity') {
+      const weeks = body?.weeks ? parseInt(String(body.weeks), 10) : 4;
+      return await this.parser.generateVelocityReport(this.settings.boardFolder, weeks);
     }
 
     const err: any = new Error(`Not found: ${method} ${path}`);

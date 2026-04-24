@@ -9,6 +9,7 @@ export interface KanbanCard {
   priority?: 'high' | 'medium' | 'low';
   tags?: string[];
   dueDate?: string;
+  completed?: string;        // 'completed: YYYY-MM-DD'
   blocked?: boolean;
   blockerReason?: string;
   linkedCards?: string[];
@@ -225,6 +226,136 @@ export class KanbanParser {
     };
   }
 
+  /**
+   * Generate a velocity report showing weekly throughput.
+   * Scans all kanban boards for completed cards (via `completed: YYYY-MM-DD` metadata
+   * or cards in Done/Completed columns) and generates per-week stats.
+   */
+  async generateVelocityReport(
+    boardFolder: string,
+    weeks: number = 4,
+  ): Promise<{
+    ok: boolean;
+    path?: string;
+    summary?: any;
+    error?: string;
+  }> {
+    const result = await this.queryCards({});
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+
+    // Collect completed cards: either with `completed` metadata or in Done/Completed columns
+    const completedCards = result.cards.filter(c => {
+      if (c.completed) return true;
+      const colLower = c.column.toLowerCase();
+      if (colLower.includes('done') || colLower.includes('completed')) return true;
+      return false;
+    });
+
+    // Calculate ISO weeks for each card's completion date
+    // Use `completed` date if available, else today for done-column cards without date
+    const weeklyCounts = new Map<string, number>();
+
+    for (const card of completedCards) {
+      let dateStr = card.completed;
+      if (!dateStr) {
+        // Cards in Done column without explicit completed date — use today
+        dateStr = todayStr;
+      }
+
+      const d = new Date(dateStr + 'T00:00:00Z');
+      const isoWeek = this.getISOWeek(d);
+      weeklyCounts.set(isoWeek, (weeklyCounts.get(isoWeek) || 0) + 1);
+    }
+
+    // Build array of week entries for the last `weeks` weeks
+    const weekEntries: Array<{ week: string; completed: number; average: number; trend: string }> = [];
+    const totalCount = completedCards.length;
+    const average = weeks > 0 ? totalCount / weeks : 0;
+
+    for (let i = weeks - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i * 7);
+      const isoWeek = this.getISOWeek(d);
+      const completed = weeklyCounts.get(isoWeek) || 0;
+
+      // Calculate trend: compare with previous week
+      let trend = '→';
+      if (i < weeks - 1) {
+        const prevDate = new Date(d);
+        prevDate.setDate(prevDate.getDate() - 7);
+        const prevWeek = this.getISOWeek(prevDate);
+        const prevCount = weeklyCounts.get(prevWeek) || 0;
+        if (completed > prevCount) trend = '▲';
+        else if (completed < prevCount) trend = '▼';
+        else trend = '→';
+      }
+
+      weekEntries.unshift({
+        week: isoWeek,
+        completed,
+        average: Math.round(average * 10) / 10,
+        trend,
+      });
+    }
+
+    const currentWeekISO = this.getISOWeek(now);
+    const reportPath = `${boardFolder}/reports/velocity-${currentWeekISO}.md`;
+    const normalizedPath = normalizePath(reportPath);
+
+    // Build markdown content
+    let content = `---\nkanban-plugin: board\n---\n\n# Velocity Report\n\n`;
+    content += `| Week | Completed | Average | Trend |\n`;
+    content += `|------|-----------|---------|-------|\n`;
+    for (const entry of weekEntries) {
+      content += `| ${entry.week} | ${entry.completed} | ${entry.average} | ${entry.trend} |\n`;
+    }
+    content += `\n**Total completed**: ${totalCount} over ${weeks} week(s)\n`;
+    content += `**Average per week**: ${Math.round(average * 10) / 10}\n`;
+
+    // Find board file to determine where to put the report
+    // Use the first board found in the folder to get folder context
+    const folder = this.app.vault.getAbstractFileByPath(normalizePath(boardFolder));
+    let baseFolder = boardFolder;
+    if (folder instanceof TFolder) {
+      baseFolder = folder.path;
+    }
+
+    const fullPath = normalizePath(`${baseFolder}/reports/velocity-${currentWeekISO}.md`);
+    await this.app.vault.adapter.mkdir(normalizePath(`${baseFolder}/reports`));
+
+    const existingFile = this.app.vault.getAbstractFileByPath(fullPath);
+    if (existingFile instanceof TFile) {
+      await this.app.vault.modify(existingFile, content);
+    } else {
+      await this.app.vault.create(fullPath, content);
+    }
+
+    return {
+      ok: true,
+      path: fullPath,
+      summary: {
+        weekEntries,
+        totalCompleted: totalCount,
+        averagePerWeek: Math.round(average * 10) / 10,
+      },
+    };
+  }
+
+  /**
+   * Get ISO 8601 week string (e.g. "2025-W17") for a given date.
+   */
+  private getISOWeek(date: Date): string {
+    const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+    // Set to nearest Thursday: current date + 4 - current day number
+    // Make Sunday's day number 7
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    const weekNum = Math.ceil(((d.valueOf() - yearStart.valueOf()) / 86400000 + 1) / 7);
+    return `${d.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`;
+  }
+
   // --- Private helpers ---
 
   /**
@@ -377,6 +508,8 @@ export class KanbanParser {
     const linkedMatches = [...rest.matchAll(/\[\[([^\]]+)\]\]/g)].map(m => m[1]);
     const recurMatch = rest.match(/recur:(daily|weekly|monthly|\d{4}-\d{2}-\d{2})/i);
     const recur = recurMatch ? recurMatch[1].toLowerCase() : undefined;
+    const completedMatch = rest.match(/completed:(\d{4}-\d{2}-\d{2})/i);
+    const completed = completedMatch ? completedMatch[1] : undefined;
 
     return {
       id: `${boardId}::${column}::${title}`,
@@ -386,6 +519,7 @@ export class KanbanParser {
       checked,
       priority,
       dueDate,
+      completed,
       tags: tagMatches.length ? tagMatches : undefined,
       blocked,
       blockerReason,
@@ -396,8 +530,10 @@ export class KanbanParser {
 
   private formatCardLine(card: Partial<KanbanCard> & { title: string }): string {
     let line = `- [ ] ${card.title}`;
+    if (card.checked) line = `- [x] ${card.title}`;
     if (card.priority) line += ` | #${card.priority}`;
     if (card.dueDate) line += ` | due:${card.dueDate}`;
+    if (card.completed) line += ` | completed:${card.completed}`;
     if (card.recur) line += ` | recur:${card.recur}`;
     if (card.tags?.length) line += ` | ${card.tags.map((t: string) => `@${t}`).join(' ')}`;
     if (card.blocked && card.blockerReason) line += ` | blocked:${card.blockerReason}`;
