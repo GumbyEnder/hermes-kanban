@@ -1,6 +1,6 @@
 {
   "name": "hermes-kanban-bridge",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Obsidian plugin that exposes a REST API for Hermes to control Kanban boards",
   "main": "main.js",
   "scripts": {
@@ -8,7 +8,12 @@
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "version": "node version-bump.mjs && git add manifest.json versions.json"
   },
-  "keywords": ["obsidian", "kanban", "hermes", "project-management"],
+  "keywords": [
+    "obsidian",
+    "kanban",
+    "hermes",
+    "project-management"
+  ],
   "author": "GumbyEnder",
   "license": "MIT",
   "devDependencies": {

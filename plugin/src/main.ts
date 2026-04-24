@@ -4,7 +4,7 @@ import { KanbanServer } from './server';
 import { McpAdapter } from './mcp-adapter';
 
 // Keep this in sync with manifest.json and package.json version
-export const PLUGIN_VERSION = '1.3.0';
+export const PLUGIN_VERSION = '1.4.0';
 
 export default class HermesKanbanPlugin extends Plugin {
   settings: HermesKanbanSettings = DEFAULT_SETTINGS;
@@ -59,6 +59,17 @@ export default class HermesKanbanPlugin extends Plugin {
           this.mcpAdapter = null;
         }
         this.saveSettings();
+      }
+    });
+
+    // BRAT command: check for updates
+    this.addCommand({
+      id: 'brat-check-update',
+      name: 'Check for BRAT Updates',
+      callback: async () => {
+        const releaseUrl = 'https://github.com/GumbyEnder/hermes-kanban/releases';
+        await navigator.clipboard.writeText(releaseUrl);
+        new Notice('Hermes Kanban Bridge: Release URL copied to clipboard. Check BRAT for updates on GitHub Releases.');
       }
     });
 
@@ -168,7 +179,7 @@ class HermesKanbanSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Enable MCP adapter')
-      .setDesc(`Expose Kanban tools via MCP on port ${this.plugin.settings.port + 1} (Claude Desktop, Cursor, Zed, etc.)`)
+      .setDesc('Expose Kanban tools via MCP on port ' + (this.plugin.settings.port + 1) + ' (Claude Desktop, Cursor, Zed, etc.)')
       .addToggle(toggle => toggle
         .setValue(this.plugin.settings.mcpEnabled)
         .onChange(async (value) => {
@@ -184,6 +195,83 @@ class HermesKanbanSettingTab extends PluginSettingTab {
             this.plugin.mcpAdapter?.stop();
             this.plugin.mcpAdapter = null;
           }
+        }));
+
+    // GitHub Integration section
+    containerEl.createEl('hr');
+    containerEl.createEl('h3', { text: 'GitHub Integration' });
+
+    new Setting(containerEl)
+      .setName('GitHub Token')
+      .setDesc('Personal access token with repo access. Stored locally only.')
+      .addText(text => {
+        text.inputEl.type = 'password';
+        text.setValue(this.plugin.settings.githubToken).onChange(async (value) => {
+          this.plugin.settings.githubToken = value;
+          await this.plugin.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName('GitHub Owner')
+      .setDesc('Your GitHub username or organization name.')
+      .addText(text => text
+        .setPlaceholder('Username or org')
+        .setValue(this.plugin.settings.githubOwner)
+        .onChange(async (value) => {
+          this.plugin.settings.githubOwner = value;
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('GitHub Repo')
+      .setDesc('The repository name to sync issues with.')
+      .addText(text => text
+        .setPlaceholder('repo-name')
+        .setValue(this.plugin.settings.githubRepo)
+        .onChange(async (value) => {
+          this.plugin.settings.githubRepo = value;
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('GitHub Project ID')
+      .setDesc('Numeric ID of the GitHub Projects board for card sync.')
+      .addText(text => text
+        .setPlaceholder('0')
+        .setValue(String(this.plugin.settings.githubProjectId))
+        .onChange(async (value) => {
+          const id = parseInt(value);
+          this.plugin.settings.githubProjectId = isNaN(id) ? 0 : id;
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('Sync Issues')
+      .setDesc('How to sync Kanban cards with GitHub Issues.')
+      .addDropdown(drop => drop
+        .addOption('off', 'Off (no sync)')
+        .addOption('push', 'Push only (Kanban to GitHub)')
+        .addOption('pull', 'Pull only (GitHub to Kanban)')
+        .addOption('bidirectional', 'Bidirectional')
+        .setValue(this.plugin.settings.syncIssues)
+        .onChange(async (value) => {
+          this.plugin.settings.syncIssues = value as 'off' | 'push' | 'pull' | 'bidirectional';
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('Sync Projects')
+      .setDesc('How to sync Kanban cards with GitHub Projects board.')
+      .addDropdown(drop => drop
+        .addOption('off', 'Off (no sync)')
+        .addOption('push', 'Push only (Kanban to GitHub)')
+        .addOption('pull', 'Pull only (GitHub to Kanban)')
+        .addOption('bidirectional', 'Bidirectional')
+        .setValue(this.plugin.settings.syncProjects)
+        .onChange(async (value) => {
+          this.plugin.settings.syncProjects = value as 'off' | 'push' | 'pull' | 'bidirectional';
+          await this.plugin.saveSettings();
         }));
   }
 }
