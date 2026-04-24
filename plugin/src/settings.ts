@@ -5,6 +5,13 @@ export interface HermesKanbanSettings {
   enabled: boolean;
   mcpEnabled: boolean;
   notificationInterval: number;
+  // GitHub integration
+  githubToken: string;
+  githubOwner: string;
+  githubRepo: string;
+  githubProjectId: number;
+  syncIssues: 'off' | 'push' | 'pull' | 'bidirectional';
+  syncProjects: 'off' | 'push' | 'pull' | 'bidirectional';
 }
 
 export const DEFAULT_SETTINGS: HermesKanbanSettings = {
@@ -14,4 +21,10 @@ export const DEFAULT_SETTINGS: HermesKanbanSettings = {
   enabled: true,
   mcpEnabled: false,
   notificationInterval: 15,
+  githubToken: '',
+  githubOwner: '',
+  githubRepo: '',
+  githubProjectId: 0,
+  syncIssues: 'off',
+  syncProjects: 'off',
 };

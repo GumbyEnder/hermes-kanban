@@ -561,7 +561,13 @@ var DEFAULT_SETTINGS = {
   trustMode: "confirm",
   enabled: true,
   mcpEnabled: false,
-  notificationInterval: 15
+  notificationInterval: 15,
+  githubToken: "",
+  githubOwner: "",
+  githubRepo: "",
+  githubProjectId: 0,
+  syncIssues: "off",
+  syncProjects: "off"
 };
 
 // src/server.ts
@@ -1004,7 +1010,7 @@ var McpAdapter = class {
 };
 
 // src/main.ts
-var PLUGIN_VERSION = "1.3.0";
+var PLUGIN_VERSION = "1.4.0";
 var HermesKanbanPlugin = class extends import_obsidian5.Plugin {
   constructor() {
     super(...arguments);
@@ -1055,6 +1061,15 @@ var HermesKanbanPlugin = class extends import_obsidian5.Plugin {
           this.mcpAdapter = null;
         }
         this.saveSettings();
+      }
+    });
+    this.addCommand({
+      id: "brat-check-update",
+      name: "Check for BRAT Updates",
+      callback: async () => {
+        const releaseUrl = "https://github.com/GumbyEnder/hermes-kanban/releases";
+        await navigator.clipboard.writeText(releaseUrl);
+        new Notice("Hermes Kanban Bridge: Release URL copied to clipboard. Check BRAT for updates on GitHub Releases.");
       }
     });
     console.log("Hermes Kanban Bridge loaded");
@@ -1121,7 +1136,7 @@ var HermesKanbanSettingTab = class extends import_obsidian5.PluginSettingTab {
         }
       }
     }));
-    new import_obsidian5.Setting(containerEl).setName("Enable MCP adapter").setDesc(`Expose Kanban tools via MCP on port ${this.plugin.settings.port + 1} (Claude Desktop, Cursor, Zed, etc.)`).addToggle((toggle) => toggle.setValue(this.plugin.settings.mcpEnabled).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Enable MCP adapter").setDesc("Expose Kanban tools via MCP on port " + (this.plugin.settings.port + 1) + " (Claude Desktop, Cursor, Zed, etc.)").addToggle((toggle) => toggle.setValue(this.plugin.settings.mcpEnabled).onChange(async (value) => {
       var _a;
       this.plugin.settings.mcpEnabled = value;
       await this.plugin.saveSettings();
@@ -1136,6 +1151,36 @@ var HermesKanbanSettingTab = class extends import_obsidian5.PluginSettingTab {
         (_a = this.plugin.mcpAdapter) == null ? void 0 : _a.stop();
         this.plugin.mcpAdapter = null;
       }
+    }));
+    containerEl.createEl("hr");
+    containerEl.createEl("h3", { text: "GitHub Integration" });
+    new import_obsidian5.Setting(containerEl).setName("GitHub Token").setDesc("Personal access token with repo access. Stored locally only.").addText((text) => {
+      text.inputEl.type = "password";
+      text.setValue(this.plugin.settings.githubToken).onChange(async (value) => {
+        this.plugin.settings.githubToken = value;
+        await this.plugin.saveSettings();
+      });
+    });
+    new import_obsidian5.Setting(containerEl).setName("GitHub Owner").setDesc("Your GitHub username or organization name.").addText((text) => text.setPlaceholder("Username or org").setValue(this.plugin.settings.githubOwner).onChange(async (value) => {
+      this.plugin.settings.githubOwner = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian5.Setting(containerEl).setName("GitHub Repo").setDesc("The repository name to sync issues with.").addText((text) => text.setPlaceholder("repo-name").setValue(this.plugin.settings.githubRepo).onChange(async (value) => {
+      this.plugin.settings.githubRepo = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian5.Setting(containerEl).setName("GitHub Project ID").setDesc("Numeric ID of the GitHub Projects board for card sync.").addText((text) => text.setPlaceholder("0").setValue(String(this.plugin.settings.githubProjectId)).onChange(async (value) => {
+      const id = parseInt(value);
+      this.plugin.settings.githubProjectId = isNaN(id) ? 0 : id;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian5.Setting(containerEl).setName("Sync Issues").setDesc("How to sync Kanban cards with GitHub Issues.").addDropdown((drop) => drop.addOption("off", "Off (no sync)").addOption("push", "Push only (Kanban to GitHub)").addOption("pull", "Pull only (GitHub to Kanban)").addOption("bidirectional", "Bidirectional").setValue(this.plugin.settings.syncIssues).onChange(async (value) => {
+      this.plugin.settings.syncIssues = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian5.Setting(containerEl).setName("Sync Projects").setDesc("How to sync Kanban cards with GitHub Projects board.").addDropdown((drop) => drop.addOption("off", "Off (no sync)").addOption("push", "Push only (Kanban to GitHub)").addOption("pull", "Pull only (GitHub to Kanban)").addOption("bidirectional", "Bidirectional").setValue(this.plugin.settings.syncProjects).onChange(async (value) => {
+      this.plugin.settings.syncProjects = value;
+      await this.plugin.saveSettings();
     }));
   }
 };
