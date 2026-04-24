@@ -11,7 +11,7 @@ export async function checkDueDateNotifications(
   settings: HermesKanbanSettings,
   parser: KanbanParser,
   notifiedIds: Set<string>,
-): Promise<{ overdue: Array<{ cardId: string; title: string; dueDate: string; board: string }>; notified: string[] }> {
+): Promise<{ overdue: Array<{ cardId: string; title: string; dueDate: string; board: string }>; notified: string[]; archived?: { archived: number; details: string[] } }> {
   const today = new Date().toISOString().slice(0, 10);
   const queryResult = await parser.queryCards({ overdue: true });
   const overdue = queryResult.cards;
@@ -35,7 +35,28 @@ export async function checkDueDateNotifications(
     board: c.boardId.split('/').pop()?.replace('.md', '') || c.boardId,
   }));
 
-  return { overdue: overdueWithBoard, notified: notifiedCardIds };
+  const result: { overdue: typeof overdueWithBoard; notified: string[]; archived?: { archived: number; details: string[] } } = {
+    overdue: overdueWithBoard,
+    notified: notifiedCardIds,
+  };
+
+  // If archive is enabled, run archival sweep during notification check
+  if (settings.archiveEnabled) {
+    try {
+      const archiveResult = await parser.archiveCards(
+        settings.boardFolder,
+        settings.archiveFilePath,
+        settings.archiveDays,
+      );
+      if (archiveResult.archived > 0) {
+        result.archived = { archived: archiveResult.archived, details: archiveResult.details };
+      }
+    } catch (err) {
+      console.error('Error during auto-archive:', err);
+    }
+  }
+
+  return result;
 }
 
 /**

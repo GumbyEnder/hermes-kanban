@@ -4,6 +4,7 @@ import { HermesKanbanSettings } from './settings';
 import { KanbanParser } from './kanban-parser';
 import { checkDueDateNotifications, startNotificationScheduler } from './notification';
 import { PLUGIN_VERSION } from './main';
+import { getTemplate } from './templates';
 
 export class KanbanServer {
   private server: http.Server | null = null;
@@ -181,5 +182,47 @@ export class KanbanServer {
     const err: any = new Error(`Not found: ${method} ${path}`);
     err.status = 404;
     throw err;
+
+    // Card archival — manual sweep
+    if (method === 'POST' && path === '/cards/archive') {
+      if (!this.settings.archiveEnabled) {
+        const e: any = new Error('Card archival is not enabled. Enable archiveEnabled in settings.');
+        e.status = 400;
+        throw e;
+      }
+      return await this.parser.archiveCards(
+        this.settings.boardFolder,
+        this.settings.archiveFilePath,
+        this.settings.archiveDays,
+      );
+    }
+
+    // Board templates — create a board from a preset template
+    if (method === 'POST' && path === '/templates') {
+      return await this.createBoardFromTemplate(body);
+    }
+  }
+
+  /**
+   * Create a board from a preset template.
+   * Body: { template: string, boardTitle: string }
+   */
+  private async createBoardFromTemplate(body: { template: string; boardTitle: string }): Promise<{ ok: boolean; path?: string; error?: string }> {
+    if (!body.template || !body.boardTitle) {
+      const e: any = new Error('Body requires "template" (template name) and "boardTitle"');
+      e.status = 400;
+      throw e;
+    }
+
+    const template = getTemplate(body.template);
+    if (!template) {
+      const e: any = new Error(`Template "${body.template}" not found. Available: ${['sprint', 'bug-triage', 'release', 'personal'].join(', ')}`);
+      e.status = 404;
+      throw e;
+    }
+
+    await this.parser.createBoard({ title: body.boardTitle, columns: template.columns }, this.settings.boardFolder);
+
+    return { ok: true, path: `${this.settings.boardFolder}/${body.boardTitle}.md` };
   }
 }

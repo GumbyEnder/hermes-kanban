@@ -587,4 +587,140 @@ export class KanbanParser {
     }
     return lines.join('\n');
   }
+
+  /**
+   * Archive done/completed cards older than the specified number of days.
+   * Moves them from the source board to an archive.md file.
+   */
+  async archiveCards(
+    boardFolder: string,
+    archiveFilePath: string,
+    archiveDays: number,
+  ): Promise<{ ok: boolean; archived: number; details: string[]; error?: string }> {
+    const today = new Date();
+    const cutoffDate = new Date(today.getTime() - archiveDays * 86400000);
+    const cutoffStr = cutoffDate.toISOString().slice(0, 10);
+    const archiveDate = today.toISOString().slice(0, 10);
+    const normalizedArchivePath = normalizePath(archiveFilePath);
+
+    const result = await this.queryCards({});
+    const doneCards = result.cards.filter(c => {
+      const colLower = c.column.toLowerCase();
+      return colLower.includes('done') || colLower.includes('completed');
+    });
+
+    const toArchive: KanbanCard[] = [];
+    for (const card of doneCards) {
+      let dateStr = card.completed;
+      if (!dateStr) {
+        dateStr = archiveDate;
+      }
+      if (dateStr < cutoffStr) {
+        toArchive.push(card);
+      }
+    }
+
+    if (toArchive.length === 0) {
+      return { ok: true, archived: 0, details: [] };
+    }
+
+    // Read existing archive or create new
+    let existingContent = '';
+    const archiveFile = this.app.vault.getAbstractFileByPath(normalizedArchivePath);
+    if (archiveFile instanceof TFile) {
+      existingContent = await this.app.vault.read(archiveFile);
+    }
+
+    // Build new card entries grouped by board
+    const archiveEntries = this.buildArchiveEntries(toArchive, archiveDate);
+
+    // If archive file exists, append to the end; otherwise create fresh
+    let newContent: string;
+    if (existingContent && existingContent.trim()) {
+      // Append entries before the final </cards> or at the end
+      if (existingContent.includes('</cards>')) {
+        const parts = existingContent.split('</cards>');
+        newContent = parts.slice(0, -1).join('</cards>') + archiveEntries + '</cards>';
+      } else {
+        newContent = existingContent.trimEnd() + '\n\n' + archiveEntries;
+      }
+    } else {
+      newContent = this.buildArchiveMarkdown(archiveEntries);
+    }
+
+    // Write updated archive
+    const archiveDir = normalizedArchivePath.substring(0, normalizedArchivePath.lastIndexOf('/'));
+    await this.app.vault.adapter.mkdir(normalizePath(archiveDir || '.')).catch(() => {});
+
+    if (archiveFile instanceof TFile) {
+      await this.app.vault.modify(archiveFile, newContent);
+    } else {
+      await this.app.vault.create(normalizedArchivePath, newContent);
+    }
+
+    // Remove archived cards from source boards
+    const details: string[] = [];
+    for (const card of toArchive) {
+      const file = this.app.vault.getAbstractFileByPath(normalizePath(card.boardId));
+      if (!(file instanceof TFile)) continue;
+      const content = await this.app.vault.read(file);
+      const lines = content.split('\n');
+      let inColumn = false;
+      let found = false;
+
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith('## ')) {
+          inColumn = lines[i].slice(3).trim() === card.column;
+        }
+        if (inColumn && (lines[i].startsWith('- [ ]') || lines[i].startsWith('- [x]'))) {
+          if (this.extractTitleFromLine(lines[i]) === card.title) {
+            lines.splice(i, 1);
+            found = true;
+            details.push(`Archived "${card.title}" from "${card.boardId}"`);
+            break;
+          }
+        }
+      }
+
+      if (found) {
+        await this.app.vault.modify(file, lines.join('\n'));
+      }
+    }
+
+    return { ok: true, archived: toArchive.length, details };
+  }
+
+  /**
+   * Build archive entries as Markdown sections, grouped by board.
+   */
+  private buildArchiveEntries(cards: KanbanCard[], archiveDate: string): string {
+    const grouped = new Map<string, KanbanCard[]>();
+    for (const card of cards) {
+      const boardName = card.boardId.split('/').pop()?.replace('.md', '') || card.boardId;
+      if (!grouped.has(boardName)) grouped.set(boardName, []);
+      grouped.get(boardName)!.push(card);
+    }
+
+    let entries = '';
+    for (const [boardName, boardCards] of grouped) {
+      entries += `\n## Board: ${boardName}\n\n`;
+      for (const card of boardCards) {
+        entries += `### ✅ ${card.title}\n`;
+        if (card.completed) entries += `- completed: ${card.completed}\n`;
+        if (card.priority) entries += `- #${card.priority}\n`;
+        if (card.tags?.length) entries += `- ${card.tags.map((t: string) => `@${t}`).join(' ')}\n`;
+        entries += `</cards>\n\n`;
+      }
+    }
+
+    return entries;
+  }
+
+  /**
+   * Build the full archive.md content with frontmatter.
+   */
+  private buildArchiveMarkdown(entries: string): string {
+    const archiveDate = new Date().toISOString().slice(0, 10);
+    return `---\nkanban-plugin: archived\n---\n\n# Archived Cards\nArchive date: ${archiveDate}\n${entries}`;
+  }
 }
