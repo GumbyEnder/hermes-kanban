@@ -4,6 +4,7 @@ export interface HermesKanbanSettings {
   trustMode: 'confirm' | 'auto';
   enabled: boolean;
   mcpEnabled: boolean;
+  notificationInterval: number;
 }
 
 export const DEFAULT_SETTINGS: HermesKanbanSettings = {
@@ -12,4 +13,5 @@ export const DEFAULT_SETTINGS: HermesKanbanSettings = {
   trustMode: 'confirm',
   enabled: true,
   mcpEnabled: false,
+  notificationInterval: 15,
 };
