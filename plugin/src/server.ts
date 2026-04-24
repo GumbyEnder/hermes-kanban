@@ -3,6 +3,7 @@ import { App, Notice } from 'obsidian';
 import { HermesKanbanSettings } from './settings';
 import { KanbanParser } from './kanban-parser';
 import { checkDueDateNotifications, startNotificationScheduler } from './notification';
+import { PLUGIN_VERSION } from './main';
 
 export class KanbanServer {
   private server: http.Server | null = null;
@@ -90,7 +91,7 @@ export class KanbanServer {
 
   private async route(method: string, path: string, params: URLSearchParams, body: any): Promise<any> {
     if (method === 'GET' && path === '/health') {
-      return { ok: true, status: 'running', port: this.settings.port, version: '1.0.0' };
+      return { ok: true, status: 'running', port: this.settings.port, version: PLUGIN_VERSION };
     }
 
     if (method === 'GET' && path === '/boards') {

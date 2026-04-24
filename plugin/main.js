@@ -548,6 +548,7 @@ kanban-plugin: board
 // src/main.ts
 var main_exports = {};
 __export(main_exports, {
+  PLUGIN_VERSION: () => PLUGIN_VERSION,
   default: () => HermesKanbanPlugin
 });
 module.exports = __toCommonJS(main_exports);
@@ -688,7 +689,7 @@ var KanbanServer = class {
   }
   async route(method, path, params, body) {
     if (method === "GET" && path === "/health") {
-      return { ok: true, status: "running", port: this.settings.port, version: "1.0.0" };
+      return { ok: true, status: "running", port: this.settings.port, version: PLUGIN_VERSION };
     }
     if (method === "GET" && path === "/boards") {
       return await this.parser.listBoards(this.settings.boardFolder);
@@ -1003,6 +1004,7 @@ var McpAdapter = class {
 };
 
 // src/main.ts
+var PLUGIN_VERSION = "1.1.0";
 var HermesKanbanPlugin = class extends import_obsidian5.Plugin {
   constructor() {
     super(...arguments);
