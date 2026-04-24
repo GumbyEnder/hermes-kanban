@@ -1233,9 +1233,6 @@ var HermesKanbanPlugin = class extends import_obsidian5.Plugin {
     if (this.settings.enabled) {
       this.server.start();
     }
-    if (this.settings.enabled && this.settings.notificationInterval > 0) {
-      this.server.startNotifier(this.settings.notificationInterval);
-    }
     if (this.settings.mcpEnabled && this.server) {
       const { KanbanParser: KanbanParser2 } = await Promise.resolve().then(() => (init_kanban_parser(), kanban_parser_exports));
       const parser = new KanbanParser2(this.app);
@@ -1278,16 +1275,15 @@ var HermesKanbanPlugin = class extends import_obsidian5.Plugin {
       callback: async () => {
         const releaseUrl = "https://github.com/GumbyEnder/hermes-kanban/releases";
         await navigator.clipboard.writeText(releaseUrl);
-        new Notice("Hermes Kanban Bridge: Release URL copied to clipboard. Check BRAT for updates on GitHub Releases.");
+        new import_obsidian5.Notice("Hermes Kanban Bridge: Release URL copied to clipboard. Check BRAT for updates on GitHub Releases.");
       }
     });
     console.log("Hermes Kanban Bridge loaded");
   }
   onunload() {
-    var _a, _b, _c;
-    (_a = this.server) == null ? void 0 : _a.stopNotifier();
-    (_b = this.server) == null ? void 0 : _b.stop();
-    (_c = this.mcpAdapter) == null ? void 0 : _c.stop();
+    var _a, _b;
+    (_a = this.server) == null ? void 0 : _a.stop();
+    (_b = this.mcpAdapter) == null ? void 0 : _b.stop();
     console.log("Hermes Kanban Bridge unloaded");
   }
   async loadSettings() {
@@ -1322,27 +1318,16 @@ var HermesKanbanSettingTab = class extends import_obsidian5.PluginSettingTab {
       await this.plugin.saveSettings();
     }));
     new import_obsidian5.Setting(containerEl).setName("Enable server").setDesc("Start the REST API server when Obsidian loads").addToggle((toggle) => toggle.setValue(this.plugin.settings.enabled).onChange(async (value) => {
-      var _a, _b, _c, _d;
+      var _a, _b;
       this.plugin.settings.enabled = value;
       await this.plugin.saveSettings();
       value ? (_a = this.plugin.server) == null ? void 0 : _a.start() : (_b = this.plugin.server) == null ? void 0 : _b.stop();
-      if (value && this.plugin.settings.notificationInterval > 0) {
-        (_c = this.plugin.server) == null ? void 0 : _c.startNotifier(this.plugin.settings.notificationInterval);
-      } else {
-        (_d = this.plugin.server) == null ? void 0 : _d.stopNotifier();
-      }
     }));
     new import_obsidian5.Setting(containerEl).setName("Due date notification interval").setDesc("Check for overdue cards every N minutes (0 = disabled). Shows an Obsidian notice for each overdue card.").addText((text) => text.setPlaceholder("15").setValue(String(this.plugin.settings.notificationInterval)).onChange(async (value) => {
-      var _a, _b;
       const minutes = parseInt(value);
       if (!isNaN(minutes) && minutes >= 0) {
         this.plugin.settings.notificationInterval = minutes;
         await this.plugin.saveSettings();
-        if (minutes > 0 && this.plugin.settings.enabled) {
-          (_a = this.plugin.server) == null ? void 0 : _a.startNotifier(minutes);
-        } else {
-          (_b = this.plugin.server) == null ? void 0 : _b.stopNotifier();
-        }
       }
     }));
     new import_obsidian5.Setting(containerEl).setName("Enable MCP adapter").setDesc("Expose Kanban tools via MCP on port " + (this.plugin.settings.port + 1) + " (Claude Desktop, Cursor, Zed, etc.)").addToggle((toggle) => toggle.setValue(this.plugin.settings.mcpEnabled).onChange(async (value) => {
