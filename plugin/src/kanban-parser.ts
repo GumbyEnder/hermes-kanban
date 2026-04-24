@@ -1,4 +1,4 @@
-import { App, TFile, TFolder, normalizePath, moment } from 'obsidian';
+import { App, TFile, TFolder, normalizePath } from 'obsidian';
 
 export interface KanbanCard {
   id: string;
@@ -9,7 +9,7 @@ export interface KanbanCard {
   priority?: 'high' | 'medium' | 'low';
   tags?: string[];
   dueDate?: string;
-  doneDate?: string;       // YYYY-MM-DD when card was marked done
+  completed?: string;        // 'completed: YYYY-MM-DD'
   blocked?: boolean;
   blockerReason?: string;
   linkedCards?: string[];
@@ -226,6 +226,136 @@ export class KanbanParser {
     };
   }
 
+  /**
+   * Generate a velocity report showing weekly throughput.
+   * Scans all kanban boards for completed cards (via `completed: YYYY-MM-DD` metadata
+   * or cards in Done/Completed columns) and generates per-week stats.
+   */
+  async generateVelocityReport(
+    boardFolder: string,
+    weeks: number = 4,
+  ): Promise<{
+    ok: boolean;
+    path?: string;
+    summary?: any;
+    error?: string;
+  }> {
+    const result = await this.queryCards({});
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+
+    // Collect completed cards: either with `completed` metadata or in Done/Completed columns
+    const completedCards = result.cards.filter(c => {
+      if (c.completed) return true;
+      const colLower = c.column.toLowerCase();
+      if (colLower.includes('done') || colLower.includes('completed')) return true;
+      return false;
+    });
+
+    // Calculate ISO weeks for each card's completion date
+    // Use `completed` date if available, else today for done-column cards without date
+    const weeklyCounts = new Map<string, number>();
+
+    for (const card of completedCards) {
+      let dateStr = card.completed;
+      if (!dateStr) {
+        // Cards in Done column without explicit completed date — use today
+        dateStr = todayStr;
+      }
+
+      const d = new Date(dateStr + 'T00:00:00Z');
+      const isoWeek = this.getISOWeek(d);
+      weeklyCounts.set(isoWeek, (weeklyCounts.get(isoWeek) || 0) + 1);
+    }
+
+    // Build array of week entries for the last `weeks` weeks
+    const weekEntries: Array<{ week: string; completed: number; average: number; trend: string }> = [];
+    const totalCount = completedCards.length;
+    const average = weeks > 0 ? totalCount / weeks : 0;
+
+    for (let i = weeks - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i * 7);
+      const isoWeek = this.getISOWeek(d);
+      const completed = weeklyCounts.get(isoWeek) || 0;
+
+      // Calculate trend: compare with previous week
+      let trend = '→';
+      if (i < weeks - 1) {
+        const prevDate = new Date(d);
+        prevDate.setDate(prevDate.getDate() - 7);
+        const prevWeek = this.getISOWeek(prevDate);
+        const prevCount = weeklyCounts.get(prevWeek) || 0;
+        if (completed > prevCount) trend = '▲';
+        else if (completed < prevCount) trend = '▼';
+        else trend = '→';
+      }
+
+      weekEntries.unshift({
+        week: isoWeek,
+        completed,
+        average: Math.round(average * 10) / 10,
+        trend,
+      });
+    }
+
+    const currentWeekISO = this.getISOWeek(now);
+    const reportPath = `${boardFolder}/reports/velocity-${currentWeekISO}.md`;
+    const normalizedPath = normalizePath(reportPath);
+
+    // Build markdown content
+    let content = `---\nkanban-plugin: board\n---\n\n# Velocity Report\n\n`;
+    content += `| Week | Completed | Average | Trend |\n`;
+    content += `|------|-----------|---------|-------|\n`;
+    for (const entry of weekEntries) {
+      content += `| ${entry.week} | ${entry.completed} | ${entry.average} | ${entry.trend} |\n`;
+    }
+    content += `\n**Total completed**: ${totalCount} over ${weeks} week(s)\n`;
+    content += `**Average per week**: ${Math.round(average * 10) / 10}\n`;
+
+    // Find board file to determine where to put the report
+    // Use the first board found in the folder to get folder context
+    const folder = this.app.vault.getAbstractFileByPath(normalizePath(boardFolder));
+    let baseFolder = boardFolder;
+    if (folder instanceof TFolder) {
+      baseFolder = folder.path;
+    }
+
+    const fullPath = normalizePath(`${baseFolder}/reports/velocity-${currentWeekISO}.md`);
+    await this.app.vault.adapter.mkdir(normalizePath(`${baseFolder}/reports`));
+
+    const existingFile = this.app.vault.getAbstractFileByPath(fullPath);
+    if (existingFile instanceof TFile) {
+      await this.app.vault.modify(existingFile, content);
+    } else {
+      await this.app.vault.create(fullPath, content);
+    }
+
+    return {
+      ok: true,
+      path: fullPath,
+      summary: {
+        weekEntries,
+        totalCompleted: totalCount,
+        averagePerWeek: Math.round(average * 10) / 10,
+      },
+    };
+  }
+
+  /**
+   * Get ISO 8601 week string (e.g. "2025-W17") for a given date.
+   */
+  private getISOWeek(date: Date): string {
+    const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+    // Set to nearest Thursday: current date + 4 - current day number
+    // Make Sunday's day number 7
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    const weekNum = Math.ceil(((d.valueOf() - yearStart.valueOf()) / 86400000 + 1) / 7);
+    return `${d.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`;
+  }
+
   // --- Private helpers ---
 
   /**
@@ -372,14 +502,14 @@ export class KanbanParser {
     const dueDateMatch = rest.match(/due:(\d{4}-\d{2}-\d{2})/);
     const dueDate = dueDateMatch ? dueDateMatch[1] : undefined;
     const tagMatches = [...rest.matchAll(/@(\w+)/g)].map(m => m[1]);
-    const doneDateMatch = rest.match(/done:(\d{4}-\d{2}-\d{2})/);
-    const doneDate = doneDateMatch ? doneDateMatch[1] : undefined;
     const blockedMatch = rest.match(/blocked:(.+?)(?:\||$)/);
     const blocked = !!blockedMatch;
     const blockerReason = blockedMatch ? blockedMatch[1].trim() : undefined;
     const linkedMatches = [...rest.matchAll(/\[\[([^\]]+)\]\]/g)].map(m => m[1]);
     const recurMatch = rest.match(/recur:(daily|weekly|monthly|\d{4}-\d{2}-\d{2})/i);
     const recur = recurMatch ? recurMatch[1].toLowerCase() : undefined;
+    const completedMatch = rest.match(/completed:(\d{4}-\d{2}-\d{2})/i);
+    const completed = completedMatch ? completedMatch[1] : undefined;
 
     return {
       id: `${boardId}::${column}::${title}`,
@@ -389,19 +519,21 @@ export class KanbanParser {
       checked,
       priority,
       dueDate,
+      completed,
       tags: tagMatches.length ? tagMatches : undefined,
       blocked,
       blockerReason,
       linkedCards: linkedMatches.length ? linkedMatches : undefined,
-      doneDate,
       recur,
     };
   }
 
   private formatCardLine(card: Partial<KanbanCard> & { title: string }): string {
     let line = `- [ ] ${card.title}`;
+    if (card.checked) line = `- [x] ${card.title}`;
     if (card.priority) line += ` | #${card.priority}`;
     if (card.dueDate) line += ` | due:${card.dueDate}`;
+    if (card.completed) line += ` | completed:${card.completed}`;
     if (card.recur) line += ` | recur:${card.recur}`;
     if (card.tags?.length) line += ` | ${card.tags.map((t: string) => `@${t}`).join(' ')}`;
     if (card.blocked && card.blockerReason) line += ` | blocked:${card.blockerReason}`;
@@ -454,196 +586,5 @@ export class KanbanParser {
       lines.push(`## ${col}`, ``);
     }
     return lines.join('\n');
-  }
-
-  /**
-   * Generate a velocity (throughput) report: count completed cards per week.
-   * Detects completion by: (1) `done: YYYY-MM-DD` metadata on card line, or
-   * (2) cards in columns whose name contains 'done' or 'completed' (case-insensitive).
-   * Cards with `done:` metadata get date-attributed; cards without it are counted
-   * in the most recent week as "currently done" (approximation).
-   * Writes a markdown note to `{boardFolder}/reports/velocity-YYYY-Www.md`.
-   */
-  async generateVelocityReport(
-    numWeeks: number = 4,
-    boardFolder?: string
-  ): Promise<{ ok: boolean; path?: string; summary?: any; error?: string }> {
-    const result = await this.queryCards({});
-    const now = moment();
-    const weeks: Array<{ weekLabel: string; weekNum: number; completed: number; trend?: string; diff?: number }> = [];
-
-    // Build week buckets
-    for (let i = 0; i < numWeeks; i++) {
-      const weekStart = now.clone().subtract(i + 1, 'weeks').startOf('week');
-      const weekEnd = weekStart.clone().endOf('week');
-      weeks.unshift({ weekLabel: weekStart.format('YYYY-[W]ww'), weekNum: i + 1, completed: 0 });
-    }
-
-    // Count completions per week
-    for (const card of result.cards) {
-      const isDone = card.checked;
-      const isDoneColumn = /^(done|completed|archived)$/i.test(card.column);
-
-      if (card.doneDate && isDone) {
-        // Date-attributed: put in the correct week bucket
-        const doneMoment = moment(card.doneDate, 'YYYY-MM-DD');
-        for (const week of weeks) {
-          const weekStart = moment().subtract(numWeeks - week.weekNum, 'weeks').startOf('week').clone().subtract(now.clone().startOf('week').diff(moment().clone().startOf('week'), 'ms') || 0);
-          // Simpler: rebuild week bounds from label
-          const ws = moment(week.weekLabel, 'YYYY-[W]ww');
-          const we = ws.clone().add(6, 'days').endOf('day');
-          if (doneMoment.isBetween(ws, we, null, '[]')) {
-            week.completed++;
-            break;
-          }
-        }
-      } else if (isDone && isDoneColumn) {
-        // No done date — attribute to most recent week
-        weeks[weeks.length - 1].completed++;
-      }
-    }
-
-    // Calculate trends
-    for (let i = 0; i < weeks.length; i++) {
-      const prev = weeks[i + 1];
-      if (prev) {
-        const diff = weeks[i].completed - prev.completed;
-        weeks[i].trend = diff > 0 ? '▲' : diff < 0 ? '▼' : '→';
-        weeks[i].diff = diff;
-      } else {
-        weeks[i].trend = '—';
-        weeks[i].diff = 0;
-      }
-    }
-
-    const total = weeks.reduce((sum, w) => sum + w.completed, 0);
-    const average = weeks.length > 0 ? Math.round(total / weeks.length) : 0;
-
-    const header = '| Week | Completed | Average | Trend |\n|------|-----------|---------|-------|';
-    const rows = weeks.map(w =>
-      `| ${w.weekLabel} | ${w.completed} | ${average} | ${w.trend ?? '—'} ${w.diff != null && w.diff > 0 ? '+' : ''}${w.diff ?? 0} |`
-    ).join('\n');
-
-    const summary = `**Hermes Kanban Velocity Report**\n\nWeeks: ${numWeeks} | Total Completed: ${total} | Weekly Average: ${average}\n\n${header}\n${rows}`;
-
-    try {
-      const currentWeekLabel = now.format('YYYY-[W]ww');
-      const reportPath = normalizePath(`${boardFolder || 'Kanban'}/reports/velocity-${currentWeekLabel}.md`);
-      await this.app.vault.adapter.mkdir(normalizePath(`${boardFolder || 'Kanban'}/reports`)).catch(() => {});
-
-      let fileContent = summary;
-      try {
-        const existing = await this.app.vault.adapter.read(reportPath);
-        fileContent = existing + '\n\n---\n' + summary;
-      } catch {
-        // File doesn't exist
-      }
-
-      await this.app.vault.adapter.write(reportPath, fileContent);
-
-      return {
-        ok: true,
-        path: reportPath,
-        summary: { numWeeks, total, average, weeks },
-      };
-    } catch (err: any) {
-      return { ok: false, error: err.message || 'Failed to write velocity report' };
-    }
-  }
-
-  /**
-   * Archive done cards from a board into a separate archive file (6.5).
-   * Moves checked/done cards older than maxDays into Kanban/archive/ to keep the active board clean.
-   */
-  async archiveCards(body: {
-    boardId: string;
-    maxDays?: number;
-    archiveFolder?: string;
-  }): Promise<{ ok: boolean; archived?: number; error?: string }> {
-    const maxDays = body.maxDays ?? 7;
-    const archiveFolder = body.archiveFolder ?? 'Kanban/archive';
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - maxDays);
-    const cutoffStr = cutoffDate.toISOString().slice(0, 10);
-
-    const boardResult = await this.getBoard(body.boardId);
-    if (!boardResult.ok || !boardResult.board) return { ok: false, error: boardResult.error };
-
-    const board = boardResult.board;
-    const doneCards = board.cards.filter(c => c.checked && c.column.toLowerCase().includes('done'));
-
-    if (doneCards.length === 0) return { ok: true, archived: 0 };
-
-    // Only archive cards with doneDate older than cutoff
-    const toArchive = doneCards.filter(c => {
-      if (!c.doneDate) return false;
-      return c.doneDate <= cutoffStr;
-    });
-
-    if (toArchive.length === 0) return { ok: true, archived: 0 };
-
-    const boardTitle = board.title.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '-');
-    const archivePath = normalizePath(`${archiveFolder}/${boardTitle}-archive.md`);
-
-    let archiveContent: string;
-    try {
-      archiveContent = await this.app.vault.adapter.read(archivePath);
-    } catch {
-      archiveContent = `---\nkanban-plugin: board\n---\n\n# ${boardTitle} — Archived\n\n## Archived\n\n`;
-    }
-
-    const archivedLines = archiveContent.split('\n');
-    const archiveInsert = toArchive.map(c => {
-      let line = `- [x] ${c.title}`;
-      if (c.priority) line += ` | #${c.priority}`;
-      if (c.dueDate) line += ` | due:${c.dueDate}`;
-      if (c.doneDate) line += ` | done:${c.doneDate}`;
-      if (c.tags?.length) line += ` | ${c.tags.map((t: string) => '@' + t).join(' ')}`;
-      return line;
-    });
-
-    let insertIdx = -1;
-    for (let i = 0; i < archivedLines.length; i++) {
-      if (archivedLines[i] === '## Archived') { insertIdx = i + 1; break; }
-    }
-    if (insertIdx === -1) {
-      archivedLines.push('## Archived');
-      insertIdx = archivedLines.length - 1;
-    }
-
-    for (const line of archiveInsert) {
-      archivedLines.splice(insertIdx, 0, line);
-    }
-
-    await this.app.vault.adapter.mkdir(normalizePath(archiveFolder)).catch(() => {});
-    await this.app.vault.adapter.write(archivePath, archivedLines.join('\n'));
-
-    // Remove archived cards from the active board
-    const file = this.app.vault.getAbstractFileByPath(normalizePath(body.boardId));
-    if (!(file instanceof TFile)) return { ok: false, error: 'Board not found: ' + body.boardId };
-
-    let content = await this.app.vault.read(file);
-    const archivedIds = new Set(toArchive.map(c => c.title));
-    const lines = content.split('\n');
-    let inDone = false;
-    const linesToRemove: number[] = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].startsWith('## ')) {
-        inDone = lines[i].slice(3).trim().toLowerCase().includes('done');
-      }
-      if (inDone && (lines[i].startsWith('- [ ]') || lines[i].startsWith('- [x]'))) {
-        if (archivedIds.has(this.extractTitleFromLine(lines[i]))) {
-          linesToRemove.push(i);
-        }
-      }
-    }
-
-    for (const idx of linesToRemove.reverse()) {
-      lines.splice(idx, 1);
-    }
-    await this.app.vault.modify(file, lines.join('\n'));
-
-    return { ok: true, archived: toArchive.length };
   }
 }
