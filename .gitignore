@@ -4,3 +4,12 @@ plugin/main.js.map
 plugin/.hotreload
 *.js.map
 .DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.pytest_cache/
+*.db
+*.db-journal
