@@ -30,6 +30,7 @@ from .kanban import (
     get_all_columns,
 )
 from .tui import run_tui
+from .sync import sync_to_obsidian
 
 DEFAULT_DB_DIR = Path.home() / ".hermes"
 DEFAULT_DB_PATH = DEFAULT_DB_DIR / "kanban.db"
@@ -368,6 +369,33 @@ def archive(card_id, yes, db_path):
     except Exception as e:
         click.echo(f"❌ Error: {e}", err=True)
         raise SystemExit(1)
+
+
+@cli.command()
+@click.option("--db-path", type=click.Path(), default=None,
+              help="Custom database path (default: ~/.hermes/kanban.db)")
+@click.option("--vault-dir", type=click.Path(), default="/mnt/nas/Obsidian Vault/Kanban",
+              help="Obsidian vault Kanban directory")
+@click.option("--board", default=None, help="Board name (default: first board in DB)")
+def sync(db_path, vault_dir, board):
+    """Sync SQLite cards to an Obsidian Kanban markdown board."""
+    if db_path is None:
+        db_path = _get_db_path()
+
+    if not Path(db_path).exists():
+        click.echo(f"❌ No database at {db_path}", err=True)
+        click.echo("Run 'hermes-kanban-sqlite init <project>' first.")
+        raise SystemExit(1)
+
+    click.echo("🔄 Syncing SQLite → Obsidian...")
+    result = sync_to_obsidian(db_path, vault_dir, board)
+
+    if result["errors"]:
+        for err in result["errors"]:
+            click.echo(f"  ⚠️  {err}", err=True)
+
+    click.echo(f"✅ Synced {result['cards_synced']} cards across {result['columns_synced']} columns")
+    click.echo(f"📄 Board: {result['board_file']}")
 
 
 @cli.command()
