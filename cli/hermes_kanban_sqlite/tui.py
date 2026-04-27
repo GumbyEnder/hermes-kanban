@@ -44,7 +44,8 @@ class KanbanCard(Static):
 
     def __init__(self, card_id: int, title: str, column_name: str = "To Do",
                  tags: list | None = None, **kwargs) -> None:
-        safe_id = title[:50] if len(title) > 50 else title
+        # Textual IDs: only letters, numbers, underscores, hyphens, no leading digit
+        safe_id = f"card-{card_id}"
         super().__init__(id=safe_id, **kwargs)
         self.card_id = card_id
         self.title = title
