@@ -245,17 +245,18 @@ class TestGetAllColumns:
     def test_get_all_columns(self, tmp_path):
         """returns all columns after schema init (but before seeding)."""
         db_path = _setup_db(tmp_path)
+        # Create a board so columns have a valid board_id FK
+        board_id = create_board(db_path, "Test Board", "Test board for columns")
         # Columns table exists but is empty until seeded
         columns = get_all_columns(db_path)
         assert isinstance(columns, list)
-        # After init_schema only, columns table exists but no rows yet
         # Seed them manually for this test
         conn = get_connection(db_path)
         cursor = conn.cursor()
         for name, desc, color, order in STANDARD_COLUMNS:
             cursor.execute(
-                "INSERT INTO columns (name, description, color, sort_order) VALUES (?, ?, ?, ?)",
-                (name, desc, color, order),
+                "INSERT INTO columns (board_id, name, description, color, sort_order) VALUES (?, ?, ?, ?, ?)",
+                (board_id, name, desc, color, order),
             )
         conn.commit()
 

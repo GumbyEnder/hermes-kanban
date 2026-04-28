@@ -46,15 +46,15 @@ def create_column(db_path: str, name: str, description: str = "", color: str = "
     conn.commit()
     return cursor.lastrowid
 
-def get_columns(db_path: str) -> List[dict]:
+def get_all_columns(db_path: str, board_id: int = None) -> List[dict]:
+    """Return columns. If board_id is given, return columns for that board only."""
     conn = get_connection(db_path)
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM columns ORDER BY sort_order")
+    if board_id is not None:
+        cursor.execute("SELECT * FROM columns WHERE board_id = ? ORDER BY sort_order", (board_id,))
+    else:
+        cursor.execute("SELECT * FROM columns ORDER BY sort_order")
     return [dict(row) for row in cursor.fetchall()]
-
-def get_all_columns(db_path: str) -> List[dict]:
-    return get_columns(db_path)
-
 def create_card(db_path: str, board_id: int, title: str, column_name: str, description: str = "", tags: List[str] = None) -> int:
     conn = get_connection(db_path)
     cursor = conn.cursor()
@@ -78,8 +78,8 @@ def get_card(db_path: str, card_id: int) -> Optional[dict]:
     row = cursor.fetchone()
     if not row:
         return None
-    cursor.execute("SELECT t.name, t.description, t.color FROM tags t JOIN card_tags ct ON t.id = ct.tag_id WHERE ct.card_id = ?", (card_id,))
-    tags = [dict(r) for r in cursor.fetchall()]
+    cursor.execute("SELECT t.name FROM tags t JOIN card_tags ct ON t.id = ct.tag_id WHERE ct.card_id = ?", (card_id,))
+    tags = [{"name": row[0]} for row in cursor.fetchall()]
     cursor.execute("SELECT author, content, created_at FROM comments WHERE card_id = ? ORDER BY created_at", (card_id,))
     comments = [dict(r) for r in cursor.fetchall()]
     return {**dict(row), "tags": tags, "comments": comments}
@@ -156,21 +156,21 @@ def add_comment(db_path: str, card_id: int, author: str, content: str) -> int:
     conn.commit()
     return cursor.lastrowid
 
-def add_dependency(db_path: str, blocker_card_id: int, blocked_by_card_id: int, status: str = "open") -> int:
+def add_dependency(db_path: str, blocker_card_id: int, blocked_by_card_id: int) -> int:
     conn = get_connection(db_path)
     cursor = conn.cursor()
     if blocker_card_id == blocked_by_card_id:
         raise KanbanError("Cannot create self-dependency")
-    cursor.execute("INSERT INTO dependencies (blocker_card_id, blocked_by_card_id, status) VALUES (?, ?, ?)", (blocker_card_id, blocked_by_card_id, status or "open"))
+    cursor.execute("INSERT INTO dependencies (blocker_card_id, blocked_by_card_id) VALUES (?, ?)", (blocker_card_id, blocked_by_card_id))
     conn.commit()
     return cursor.lastrowid
 
 def get_dependencies(db_path: str, card_id: int) -> dict:
     conn = get_connection(db_path)
     cursor = conn.cursor()
-    cursor.execute("SELECT c1.id, c1.title, c1.column_name FROM cards c1 JOIN dependencies d ON c1.id = d.blocker_card_id WHERE d.blocked_by_card_id = ? AND d.status != 'cancelled'", (card_id,))
+    cursor.execute("SELECT c1.id, c1.title, c1.column_name FROM cards c1 JOIN dependencies d ON c1.id = d.blocker_card_id WHERE d.blocked_by_card_id = ?", (card_id,))
     blockers = [dict(r) for r in cursor.fetchall()]
-    cursor.execute("SELECT c2.id, c2.title, c2.column_name FROM cards c2 JOIN dependencies d ON c2.id = d.blocked_by_card_id WHERE d.blocker_card_id = ? AND d.status != 'cancelled'", (card_id,))
+    cursor.execute("SELECT c2.id, c2.title, c2.column_name FROM cards c2 JOIN dependencies d ON c2.id = d.blocked_by_card_id WHERE d.blocker_card_id = ?", (card_id,))
     blocked_by = [dict(r) for r in cursor.fetchall()]
     return {"blockers": blockers, "blocked_by": blocked_by}
 

@@ -76,7 +76,10 @@ def init(project_name, db_path):
         conn = get_connection(db_path)
         cursor = conn.cursor()
         for name, desc, color, order in STANDARD_COLUMNS:
-            cursor.execute("INSERT OR IGNORE INTO columns (name, description, color, sort_order) VALUES (?, ?, ?, ?)", (name, desc, color.lower(), order))
+            cursor.execute(
+                "INSERT OR IGNORE INTO columns (board_id, name, description, color, sort_order) VALUES (?, ?, ?, ?, ?)",
+                (board_id, name, desc, color.lower(), order)
+            )
         conn.commit()
         click.echo(f"Board created: {project_name} (id={board_id})")
         click.echo(f"Database: {db_path}")
@@ -286,7 +289,7 @@ def demo(project, board, db_path):
         conn = get_connection(db_path)
         cursor = conn.cursor()
         standard_col_names = [name for name, _, _, _ in STANDARD_COLUMNS]
-        missing_cols = [name for name in standard_col_names if name not in get_all_columns(db_path)]
+        missing_cols = [name for name in standard_col_names if name not in get_all_columns(db_path, board_id)]
         if not boards:
             click.echo("Creating demo board...")
             cursor.execute("INSERT INTO boards (name, description) VALUES (?, ?)", (board or project, "Demo board seeded by hermes-kanban-sqlite demo"))
@@ -303,7 +306,10 @@ def demo(project, board, db_path):
             click.echo(f"Ensuring columns: {', '.join(missing_cols)}")
             for name, desc, color, order in STANDARD_COLUMNS:
                 try:
-                    cursor.execute("INSERT OR IGNORE INTO columns (name, description, color, sort_order) VALUES (?, ?, ?, ?)", (name, desc, color.lower(), order))
+                    cursor.execute(
+                        "INSERT OR IGNORE INTO columns (board_id, name, description, color, sort_order) VALUES (?, ?, ?, ?, ?)",
+                        (board_id, name, desc, color.lower(), order)
+                    )
                 except sqlite3.IntegrityError:
                     pass
         else:

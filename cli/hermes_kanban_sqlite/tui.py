@@ -133,7 +133,7 @@ class KanbanBoard(Screen):
                 title_widget.update(f"📋 {board['name']}")
 
             # Render columns
-            columns = get_all_columns(self.db_path)
+            columns = get_all_columns(self.db_path, self.board_id)
             if not columns:
                 self.notify("No columns defined.", severity="warning")
                 return
@@ -219,7 +219,7 @@ class KanbanBoard(Screen):
             title_widget.update(f"📋 {board['name']}")
 
         # Re-render columns
-        columns = get_all_columns(self.db_path)
+        columns = get_all_columns(self.db_path, self.board_id)
         for col in columns:
             cards = list_cards(
                 self.db_path,

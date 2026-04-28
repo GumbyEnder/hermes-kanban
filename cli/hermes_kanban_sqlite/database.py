@@ -1,100 +1,126 @@
 """
 Database module — SQLite schema for Kanban boards.
 
-Tables:
-- boards: Project/board metadata
-- columns: Column definitions (global across boards)
-- cards: Tasks (board-scoped via board_id)
-- tags: Tag vocabulary
-- card_tags: Card→tag many-to-many
-- dependencies: Card blocking relationships
-- comments: Card discussion threads
+Schema — boards (id, name, description)
+        columns (id, board_id, name, description, color, sort_order)
+        cards (id, board_id, title, description, column_name, due_date, status, created_at, updated_at)
+        tags (id, name)
+        card_tags (card_id, tag_id)
+        dependencies (id, blocker_card_id, blocked_by_card_id)
+        comments (id, card_id, author, content, created_at)
+
+All constraints and indexes created in init_schema().
+Legacy DB migration (pre-board_id) runs automatically on first open.
 """
+
 import sqlite3
 from pathlib import Path
 from typing import Optional
 
-# Connection pool singleton
-_db_connection = None
-_db_connection_path = None
-_db_connection_closed = False
+_db_connection: Optional[sqlite3.Connection] = None
+_db_connection_path: Optional[str] = None
+_db_connection_closed: bool = False
+
 
 def get_connection(db_path: str) -> sqlite3.Connection:
-    """Get a connection from the pool (creates new if needed)."""
-    global _db_connection, _db_connection_path, _db_connection_closed
-    if _db_connection is None or _db_connection_closed or _db_connection_path != db_path:
-        if _db_connection is not None and not _db_connection_closed:
-            _db_connection.close()
-        _db_connection = sqlite3.connect(db_path, timeout=30.0)
-        _db_connection.row_factory = sqlite3.Row
-        _db_connection_path = db_path
-        _db_connection_closed = False
-    return _db_connection
-
-def reset_connection() -> None:
-    """Reset the connection pool (used by tests)."""
     global _db_connection, _db_connection_path, _db_connection_closed
     if _db_connection is not None and not _db_connection_closed:
+        if _db_connection_path != db_path:
+            _db_connection.close()
+            _db_connection = None
+            _db_connection_path = None
+        else:
+            return _db_connection
+    _db_connection = sqlite3.connect(db_path)
+    _db_connection.row_factory = sqlite3.Row
+    _db_connection_path = db_path
+    _db_connection_closed = False
+    return _db_connection
+
+
+def close_connection():
+    global _db_connection, _db_connection_closed
+    if _db_connection is not None:
         _db_connection.close()
+        _db_connection_closed = True
+
+
+def reset_connection():
+    global _db_connection, _db_connection_path, _db_connection_closed
+    if _db_connection is not None:
+        try:
+            _db_connection.close()
+        except Exception:
+            pass
     _db_connection = None
     _db_connection_path = None
     _db_connection_closed = False
 
+
 def init_schema(db_path: str) -> None:
-    """Initialize all tables, indexes, and migrate legacy single-board DBs."""
     conn = get_connection(db_path)
     cursor = conn.cursor()
 
-    # 1. Boards (must exist before cards for FK)
-    cursor.execute("""
+    # Boards
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS boards (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
-            description TEXT DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-    """)
+        """
+    )
 
-    # 2. Columns (global, not per-board)
-    cursor.execute("""
+    # Columns — each belongs to a board (board_id references boards)
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS columns (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            description TEXT DEFAULT '',
-            color TEXT DEFAULT '#6c757d',
-            sort_order INTEGER DEFAULT 0
+            board_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT,
+            color TEXT,
+            sort_order INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE,
+            UNIQUE(board_id, name)
         )
-    """)
+        """
+    )
 
-    # 3. Cards — now board-scoped
-    cursor.execute("""
+    # Cards — now board-scoped
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS cards (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             board_id INTEGER NOT NULL DEFAULT 1,
             title TEXT NOT NULL,
-            description TEXT DEFAULT '',
-            column_name TEXT NOT NULL,
+            description TEXT,
+            column_name TEXT NOT NULL DEFAULT 'To Do',
+            due_date TEXT,
             status TEXT NOT NULL DEFAULT 'active',
+            is_blocked BOOLEAN DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(board_id, title),
-            FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE
+            FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE,
+            UNIQUE(board_id, title)
         )
-    """)
+        """
+    )
 
-    # 4. Tags
-    cursor.execute("""
+    # Tags and card_tags (many-to-many)
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS tags (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            description TEXT DEFAULT '',
-            color TEXT DEFAULT '#007bff'
+            name TEXT NOT NULL UNIQUE
         )
-    """)
-
-    # 5. Card-tags pivot
-    cursor.execute("""
+        """
+    )
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS card_tags (
             card_id INTEGER NOT NULL,
             tag_id INTEGER NOT NULL,
@@ -102,24 +128,27 @@ def init_schema(db_path: str) -> None:
             FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
             FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
         )
-    """)
+        """
+    )
 
-    # 6. Dependencies
-    cursor.execute("""
+    # Dependencies — blocker → blocked
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS dependencies (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             blocker_card_id INTEGER NOT NULL,
             blocked_by_card_id INTEGER NOT NULL,
-            status TEXT NOT NULL DEFAULT 'open',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (blocker_card_id) REFERENCES cards(id),
-            FOREIGN KEY (blocked_by_card_id) REFERENCES cards(id)
+            FOREIGN KEY (blocker_card_id) REFERENCES cards(id) ON DELETE CASCADE,
+            FOREIGN KEY (blocked_by_card_id) REFERENCES cards(id) ON DELETE CASCADE,
+            UNIQUE(blocker_card_id, blocked_by_card_id)
         )
-    """)
+        """
+    )
 
-    # 7. Comments
-    cursor.execute("""
+    # Comments
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS comments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             card_id INTEGER NOT NULL,
@@ -128,7 +157,22 @@ def init_schema(db_path: str) -> None:
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
         )
-    """)
+        """
+    )
+
+    conn.commit()
+
+    # --- LEGACY MIGRATION (pre-board_id) — MUST run BEFORE indexing board_id ---
+    cursor.execute("PRAGMA table_info(cards)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'board_id' not in columns:
+        try:
+            cursor.execute("ALTER TABLE cards ADD COLUMN board_id INTEGER DEFAULT 1")
+            cursor.execute("UPDATE cards SET board_id = 1 WHERE board_id IS NULL")
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_cards_board_title ON cards(board_id, title)")
+            conn.commit()
+        except Exception as e:
+            print(f"[MIGRATION] Skipped board_id migration: {e}")
 
     # Indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_cards_column ON cards(column_name)")
@@ -139,33 +183,31 @@ def init_schema(db_path: str) -> None:
 
     conn.commit()
 
-    # Migration: upgrade legacy DBs (pre-board_id) to multi-board
-    cursor.execute("PRAGMA table_info(cards)")
-    columns = [row[1] for row in cursor.fetchall()]
-    if 'board_id' not in columns:
-        try:
-            print("[MIGRATION] Adding board_id column to cards table...")
-            cursor.execute("ALTER TABLE cards ADD COLUMN board_id INTEGER DEFAULT 1")
-            cursor.execute("UPDATE cards SET board_id = 1 WHERE board_id IS NULL")
-            # New composite unique index matches UNIQUE(board_id, title) from CREATE TABLE
-            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_cards_board_title ON cards(board_id, title)")
-            conn.commit()
-            print("[MIGRATION] board_id column added and backfilled to existing cards.")
-        except Exception as e:
-            print(f"[WARN] board_id migration skipped: {e}")
 
-# Standard column definitions (global)
 STANDARD_COLUMNS = [
-    ("Backlog", "Cards waiting to be picked up", "#28a745", 0),
-    ("To Do", "Ready for work this cycle", "#17a2b8", 1),
-    ("In Progress", "Currently being worked on", "#ffc107", 2),
-    ("Review", "Awaiting code review or testing", "#fd7e14", 3),
-    ("Done", "Completed and verified", "#28a745", 4),
-    ("Blocked", "Waiting on external dependency", "#dc3545", 5),
+    ("Backlog",    "Cards waiting to be picked up",     "#28a745",  0),
+    ("To Do",      "Ready for work this cycle",          "#17a2b8",  1),
+    ("In Progress","Currently being worked on",           "#ffc107",  2),
+    ("Review",     "Awaiting review or approval",        "#6f42c1",  3),
+    ("Done",       "Completed work",                     "#28a745",  4),
+    ("Blocked",    "Cannot proceed — blocked item",     "#dc3545",  5),
 ]
 
-if __name__ == "__main__":
-    import tempfile
-    db_path = f"file:{tempfile.mkdtemp()}/kanban.db"
-    init_schema(db_path)
-    print(f"✓ Schema initialized at {db_path}")
+
+class SQLiteDatabase:
+    """Context manager for SQLite database operations."""
+    def __init__(self, db_path: str):
+        from pathlib import Path
+        self.db_path = str(Path(db_path).expanduser().resolve())
+        self.conn: Optional[sqlite3.Connection] = None
+
+    def __enter__(self):
+        self.conn = get_connection(self.db_path)
+        return self.conn.cursor()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.conn:
+            if exc_type is None:
+                self.conn.commit()
+            else:
+                self.conn.rollback()

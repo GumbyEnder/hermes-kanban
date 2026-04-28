@@ -47,13 +47,31 @@ def sync_to_obsidian(
         "errors": [],
     }
 
-    # Determine board name
+    # Determine board ID (the actual board to sync) and display name (for filename/frontmatter)
+    boards = list_boards(db_path)
+    if not boards:
+        result["errors"].append("No boards found in database")
+        return result
+
     if board_name is None:
-        boards = list_boards(db_path)
-        if not boards:
-            result["errors"].append("No boards found in database")
-            return result
-        board_name = boards[0]["name"]
+        # Use the first board's name as both identifier and display name
+        board = boards[0]
+        board_id = board["id"]
+        board_name = board["name"]
+    else:
+        # board_name provided: try to match to an existing board for data source; if not found, use first board but keep the provided name for display
+        matched = None
+        for b in boards:
+            if b["name"] == board_name:
+                matched = b
+                break
+        if matched:
+            board_id = matched["id"]
+            # board_name remains as provided (could be same as matched)
+        else:
+            # No matching board: use first board's data but keep provided board_name for output (override)
+            board_id = boards[0]["id"]
+            # board_name stays as the user-provided custom name
 
     # Sanitize filename (always apply space→dash)
     safe_name = board_name.replace(" ", "-").replace("/", "-")
@@ -64,19 +82,19 @@ def sync_to_obsidian(
     board_file.parent.mkdir(parents=True, exist_ok=True)
 
     # Collect data from SQLite
-    columns = get_all_columns(db_path)
+    columns = get_all_columns(db_path, board_id)
     if not columns:
         # Seed standard columns if table is empty
         conn = get_connection(db_path)
         cursor = conn.cursor()
         for name, desc, color, order in STANDARD_COLUMNS:
             cursor.execute(
-                "INSERT OR IGNORE INTO columns (name, description, color, sort_order) "
-                "VALUES (?, ?, ?, ?)",
-                (name, desc, color, order),
+                "INSERT OR IGNORE INTO columns (board_id, name, description, color, sort_order) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (board_id, name, desc, color, order),
             )
         conn.commit()
-        columns = get_all_columns(db_path)
+        columns = get_all_columns(db_path, board_id)
     if not columns:
         result["errors"].append("No columns found in database")
         return result
@@ -86,7 +104,7 @@ def sync_to_obsidian(
 
     for col in columns:
         col_name = col["name"]
-        cards = list_cards(db_path, column_name=col_name)
+        cards = list_cards(db_path, board_id=board_id, column_name=col_name)
         result["cards_synced"] += len(cards)
 
         lines.append(f"## {col_name}")
