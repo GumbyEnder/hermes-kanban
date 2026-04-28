@@ -2,24 +2,25 @@
 Database module — SQLite schema for Kanban boards.
 
 Tables:
-- cards: Kanban card records (title, description, column, status)
-- columns: Board columns (Backlog, To Do, In Progress, etc.)
-- boards: Kanban board metadata
-- tags: Card tag definitions
-- dependencies: Card dependency relationships
-- comments: Comments on cards
+- boards: Project/board metadata
+- columns: Column definitions (global across boards)
+- cards: Tasks (board-scoped via board_id)
+- tags: Tag vocabulary
+- card_tags: Card→tag many-to-many
+- dependencies: Card blocking relationships
+- comments: Card discussion threads
 """
 import sqlite3
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Optional
 
-# Database connection pool (single thread-safe instance)
+# Connection pool singleton
 _db_connection = None
 _db_connection_path = None
 _db_connection_closed = False
 
 def get_connection(db_path: str) -> sqlite3.Connection:
-    """Get a connection from the pool."""
+    """Get a connection from the pool (creates new if needed)."""
     global _db_connection, _db_connection_path, _db_connection_closed
     if _db_connection is None or _db_connection_closed or _db_connection_path != db_path:
         if _db_connection is not None and not _db_connection_closed:
@@ -30,9 +31,8 @@ def get_connection(db_path: str) -> sqlite3.Connection:
         _db_connection_closed = False
     return _db_connection
 
-
 def reset_connection() -> None:
-    """Reset the connection pool (for testing)."""
+    """Reset the connection pool (used by tests)."""
     global _db_connection, _db_connection_path, _db_connection_closed
     if _db_connection is not None and not _db_connection_closed:
         _db_connection.close()
@@ -41,57 +41,59 @@ def reset_connection() -> None:
     _db_connection_closed = False
 
 def init_schema(db_path: str) -> None:
-    """Initialize all tables and indexes."""
+    """Initialize all tables, indexes, and migrate legacy single-board DBs."""
     conn = get_connection(db_path)
     cursor = conn.cursor()
 
-    # Cards table — core Kanban card records
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS cards (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            description TEXT DEFAULT '',
-            column_name TEXT NOT NULL,  -- Backlog, To Do, In Progress, Review, Done, Blocked
-            status TEXT NOT NULL DEFAULT 'active',  -- active, archived, deleted
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(title)  -- prevent duplicate card titles per board (enforced by app logic)
-        )
-    """)
-
-    # Columns table — board columns with display order
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS columns (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,  -- e.g., "Backlog", "To Do", "In Progress"
-            description TEXT DEFAULT '',
-            color TEXT DEFAULT '#6c757d',  -- hex color for UI styling
-            sort_order INTEGER DEFAULT 0
-        )
-    """)
-
-    # Boards table — board metadata
+    # 1. Boards (must exist before cards for FK)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS boards (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,  -- e.g., "Project X Backlog", "Bug Tracker"
+            name TEXT NOT NULL UNIQUE,
             description TEXT DEFAULT '',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-    # Tags table — reusable tag definitions
+    # 2. Columns (global, not per-board)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS columns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            description TEXT DEFAULT '',
+            color TEXT DEFAULT '#6c757d',
+            sort_order INTEGER DEFAULT 0
+        )
+    """)
+
+    # 3. Cards — now board-scoped
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS cards (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            board_id INTEGER NOT NULL DEFAULT 1,
+            title TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            column_name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(board_id, title),
+            FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE
+        )
+    """)
+
+    # 4. Tags
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tags (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,  -- e.g., "high-priority", "feature-request"
+            name TEXT NOT NULL UNIQUE,
             description TEXT DEFAULT '',
             color TEXT DEFAULT '#007bff'
         )
     """)
 
-    # Card-tags pivot table
+    # 5. Card-tags pivot
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS card_tags (
             card_id INTEGER NOT NULL,
@@ -102,13 +104,13 @@ def init_schema(db_path: str) -> None:
         )
     """)
 
-    # Dependencies table — card blocking/depends-on relationships
+    # 6. Dependencies
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS dependencies (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             blocker_card_id INTEGER NOT NULL,
             blocked_by_card_id INTEGER NOT NULL,
-            status TEXT NOT NULL DEFAULT 'open',  -- open, resolved, cancelled
+            status TEXT NOT NULL DEFAULT 'open',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (blocker_card_id) REFERENCES cards(id),
@@ -116,27 +118,43 @@ def init_schema(db_path: str) -> None:
         )
     """)
 
-    # Comments table — card discussions
+    # 7. Comments
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS comments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             card_id INTEGER NOT NULL,
-            author TEXT NOT NULL,  -- CLI username or system
+            author TEXT NOT NULL,
             content TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
         )
     """)
 
-    # Indexes for fast queries
-    cursor.execute("""CREATE INDEX IF NOT EXISTS idx_cards_column ON cards(column_name)""")
-    cursor.execute("""CREATE INDEX IF NOT EXISTS idx_cards_status ON cards(status)""")
-    cursor.execute("""CREATE INDEX IF NOT EXISTS idx_card_tags_card_id ON card_tags(card_id)""")
-    cursor.execute("""CREATE INDEX IF NOT EXISTS idx_dependencies_blocker ON dependencies(blocker_card_id, blocker_card_id)""")
+    # Indexes
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_cards_column ON cards(column_name)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_cards_status ON cards(status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_cards_board ON cards(board_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_card_tags_card_id ON card_tags(card_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_dependencies_blocker ON dependencies(blocker_card_id, blocked_by_card_id)")
 
     conn.commit()
 
-# Pre-define standard columns (can be overridden per board)
+    # Migration: upgrade legacy DBs (pre-board_id) to multi-board
+    cursor.execute("PRAGMA table_info(cards)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'board_id' not in columns:
+        try:
+            print("[MIGRATION] Adding board_id column to cards table...")
+            cursor.execute("ALTER TABLE cards ADD COLUMN board_id INTEGER DEFAULT 1")
+            cursor.execute("UPDATE cards SET board_id = 1 WHERE board_id IS NULL")
+            # New composite unique index matches UNIQUE(board_id, title) from CREATE TABLE
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_cards_board_title ON cards(board_id, title)")
+            conn.commit()
+            print("[MIGRATION] board_id column added and backfilled to existing cards.")
+        except Exception as e:
+            print(f"[WARN] board_id migration skipped: {e}")
+
+# Standard column definitions (global)
 STANDARD_COLUMNS = [
     ("Backlog", "Cards waiting to be picked up", "#28a745", 0),
     ("To Do", "Ready for work this cycle", "#17a2b8", 1),
@@ -148,7 +166,6 @@ STANDARD_COLUMNS = [
 
 if __name__ == "__main__":
     import tempfile
-    # Self-test: create in-memory DB and verify schema
     db_path = f"file:{tempfile.mkdtemp()}/kanban.db"
     init_schema(db_path)
     print(f"✓ Schema initialized at {db_path}")

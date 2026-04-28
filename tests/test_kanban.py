@@ -148,7 +148,7 @@ class TestUpdateCard:
         board_id = create_board(db_path, "Update Test Board")
         card_id = create_card(db_path, board_id, "Moveable Card", "To Do")
 
-        result = update_card(db_path, card_id, column_name="In Progress")
+        result = update_card(db_path, card_id, board_id, column_name="In Progress")
         assert result is True
 
         card = get_card(db_path, card_id)
@@ -160,7 +160,7 @@ class TestUpdateCard:
         board_id = create_board(db_path, "No Change Test Board")
         card_id = create_card(db_path, board_id, "Static Card", "To Do")
 
-        result = update_card(db_path, card_id)
+        result = update_card(db_path, card_id, board_id)
         assert result is False
 
 
