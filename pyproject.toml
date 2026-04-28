@@ -1,0 +1,23 @@
+[project]
+name = "hermes-kanban-sqlite"
+version = "0.1.1"
+description = "SQLite-backed Kanban CLI/TUI — real-time operational layer for hermes-kanban"
+readme = "docs/README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "textual>=0.47",
+    "click>=8.1",
+]
+
+[project.scripts]
+hermes-kanban-sqlite = "hermes_kanban_sqlite.cli:main"
+
+[build-system]
+requires = ["setuptools>=65"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "cli"}
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
