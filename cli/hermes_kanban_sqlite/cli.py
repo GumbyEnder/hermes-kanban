@@ -352,31 +352,27 @@ def demo(project, board, db_path):
     try:
         # Get first existing board ID, or create new one
         boards = list_boards(db_path)
-        
+
         # Ensure columns exist (requires conn - define early)
         conn = get_connection(db_path)
         cursor = conn.cursor()
         standard_col_names = [name for name, _, _, _ in STANDARD_COLUMNS]
         missing_cols = [name for name in standard_col_names if name not in get_all_columns(db_path)]
-        
+
         # Create board if needed
         if not boards:
             click.echo("🔧 No boards exist. Creating demo board...")
             cursor.execute(
                 "INSERT INTO boards (name, description) VALUES (?, ?)",
-                (board or "Main", f"Demo board seeded by hermes-kanban-sqlite demo command")
+                (board or "Main", "Demo board seeded by hermes-kanban-sqlite demo command")
             )
             conn.commit()
-            # SQLite3 uses last_insert_rowid() instead of cursor.lastrowid
-            cursor.execute("SELECT last_insert_rowid()")  
+            cursor.execute("SELECT last_insert_rowid()")
             row = cursor.fetchone()
-            if row:
-                board_id = row[0]
-            else:
-                board_id = 1  # Default fallback
+            board_id = row[0] if row else 1
         else:
-            board_id = boards[0]["id"]  # Use first existing board
-        
+            board_id = boards[0]["id"]
+
         # Ensure columns exist
         if missing_cols:
             click.echo(f"📋 Ensuring columns: {', '.join(missing_cols)}")
@@ -391,158 +387,88 @@ def demo(project, board, db_path):
         else:
             click.echo("✅ Standard columns already exist")
         conn.commit()
-        
-        # Seed 14 realistic cards with varied titles, tags, and metadata
+
+        # Demo card definitions (13 cards across Backlog, To Do, In Progress, Review, Blocked)
         demo_cards = [
-            # Column: Backlog (3 cards)
-            {
-                "title": "Design sync schema",
-                "column": "Backlog",
-                "description": "Create database schema for bidirectional sync between SQLite and external Kanban instances.",
-                "tags": ["backend", "devops"],
-                "due_date": "2026-05-13",
-            },
-            {
-                "title": "Investigate DB lock contention",
-                "column": "Backlog",
-                "description": "Profile SQLite connection pool and identify deadlock scenarios under concurrent TUI access.",
-                "tags": ["backend", "devops"],
-                "due_date": "2026-05-18",
-            },
-            {
-                "title": "Create board templates API",
-                "column": "Backlog",
-                "description": "Build REST endpoints to create pre-configured Kanban boards with columns and default cards.",
-                "tags": ["backend", "devops"],
-            },
-            # Column: To Do (4 cards)
-            {
-                "title": "Fix TUI column layout",
-                "column": "To Do",
-                "description": "Adjust column widths so 'Blocked' and 'Done' fit properly in the Textual render.",
-                "tags": ["frontend", "ui/ux"],
-                "due_date": "2026-05-08",
-            },
-            {
-                "title": "Add auto-refresh to TUI",
-                "column": "To Do",
-                "description": "Implement polling for new cards/columns without requiring manual redraw trigger.",
-                "tags": ["frontend", "devops"],
-                "due_date": "2026-05-15",
-            },
-            {
-                "title": "Write sync bridge tests",
-                "column": "To Do",
-                "description": "Add pytest coverage for the sync_to_obsidian function with edge cases.",
-                "tags": ["frontend", "qa"],
-                "due_date": "2026-05-10",
-            },
-            {
-                "title": "Document CLI commands",
-                "column": "To Do",
-                "description": "Expand README with examples for add, move, info, and dependency subcommands.",
-                "tags": ["docs", "qa"],
-                "due_date": "2026-05-12",
-            },
-            # Column: In Progress (4 cards)
-            {
-                "title": "Review PR #7 feedback",
-                "column": "In Progress",
-                "description": "Address code review comments around database connection pooling in kanban.py.",
-                "tags": ["frontend", "backend"],
-                "due_date": "2026-05-09",
-            },
-            {
-                "title": "Benchmark SQLite performance",
-                "column": "In Progress",
-                "description": "Run load tests with 100+ cards across columns to identify scaling bottlenecks.",
-                "tags": ["backend", "devops"],
-                "due_date": "2026-05-20",
-            },
-            {
-                "title": "Implement GitHub Issues import",
-                "column": "In Progress",
-                "description": "Create parser to extract issue data from GitHub API and create Kanban cards.",
-                "tags": ["backend", "devops"],
-                "due_date": "2026-05-14",
-            },
-            {
-                "title": "Update CI/CD pipeline",
-                "column": "In Progress",
-                "description": "Add automated deployment workflow for hermes-kanban-sqlite releases.",
-                "tags": ["devops", "backend"],
-                "due_date": "2026-05-19",
-            },
-            # Column: Review (3 cards)
-            {
-                "title": "Deploy to Cloudflare",
-                "column": "Review",
-                "description": "Set up Cloudflare Pages deployment for web-based Kanban demo.",
-                "tags": ["devops", "frontend"],
-                "due_date": "2026-05-11",
-            },
-            {
-                "title": "Blocked: API gateway routing",
-                "column": "Review",
-                "description": "Configure Cloudflare Workers to route Kanban webhook events.",
-                "tags": ["devops", "backend"],
-                "is_blocked": True,
-            },
+            # Column: Backlog (3)
+            {"title": "Design sync schema", "column": "Backlog", "description": "Create database schema for bidirectional sync between SQLite and external Kanban instances.", "tags": ["backend", "devops"], "due_date": "2026-05-13"},
+            {"title": "Investigate DB lock contention", "column": "Backlog", "description": "Profile SQLite connection pool and identify deadlock scenarios under concurrent TUI access.", "tags": ["backend", "devops"], "due_date": "2026-05-18"},
+            {"title": "Create board templates API", "column": "Backlog", "description": "Build REST endpoints to create pre-configured Kanban boards with columns and default cards.", "tags": ["backend", "devops"]},
+            # Column: To Do (4)
+            {"title": "Fix TUI column layout", "column": "To Do", "description": "Adjust column widths so 'Blocked' and 'Done' fit properly in the Textual render.", "tags": ["frontend", "ui/ux"], "due_date": "2026-05-08"},
+            {"title": "Add auto-refresh to TUI", "column": "To Do", "description": "Implement polling for new cards/columns without requiring manual redraw trigger.", "tags": ["frontend", "devops"], "due_date": "2026-05-15"},
+            {"title": "Write sync bridge tests", "column": "To Do", "description": "Add pytest coverage for the sync_to_obsidian function with edge cases.", "tags": ["frontend", "qa"], "due_date": "2026-05-10"},
+            {"title": "Document CLI commands", "column": "To Do", "description": "Expand README with examples for add, move, info, and dependency subcommands.", "tags": ["docs", "qa"], "due_date": "2026-05-12"},
+            # Column: In Progress (4)
+            {"title": "Review PR #7 feedback", "column": "In Progress", "description": "Address code review comments around database connection pooling in kanban.py.", "tags": ["frontend", "backend"], "due_date": "2026-05-09"},
+            {"title": "Benchmark SQLite performance", "column": "In Progress", "description": "Run load tests with 100+ cards across columns to identify scaling bottlenecks.", "tags": ["backend", "devops"], "due_date": "2026-05-20"},
+            {"title": "Implement GitHub Issues import", "column": "In Progress", "description": "Create parser to extract issue data from GitHub API and create Kanban cards.", "tags": ["backend", "devops"], "due_date": "2026-05-14"},
+            {"title": "Update CI/CD pipeline", "column": "In Progress", "description": "Add automated deployment workflow for hermes-kanban-sqlite releases.", "tags": ["devops", "backend"], "due_date": "2026-05-19"},
+            # Column: Review (1) and Blocked (1)
+            {"title": "Deploy to Cloudflare", "column": "Review", "description": "Set up Cloudflare Pages deployment for web-based Kanban demo.", "tags": ["devops", "frontend"], "due_date": "2026-05-11"},
+            {"title": "Blocked: API gateway routing", "column": "Blocked", "description": "Configure Cloudflare Workers to route Kanban webhook events.", "tags": ["devops", "backend"]},
         ]
+
+        # Idempotency: remove any pre-existing demo cards by title to avoid duplicate conflicts
+        demo_titles = [c["title"] for c in demo_cards]
+        if demo_titles:
+            placeholders = ','.join('?' for _ in demo_titles)
+            # Delete dependencies referencing these cards
+            cursor.execute(
+                f"DELETE FROM dependencies WHERE blocker_card_id IN (SELECT id FROM cards WHERE title IN ({placeholders})) OR blocked_by_card_id IN (SELECT id FROM cards WHERE title IN ({placeholders}))",
+                demo_titles + demo_titles
+            )
+            # Delete cards (comments and card_tags cascade)
+            cursor.execute(
+                f"DELETE FROM cards WHERE title IN ({placeholders})",
+                demo_titles
+            )
+            conn.commit()
 
         # Track summary stats
         tags_set = set()
         comments_count = 0
         dependency_created = False
+        created_cards = {}  # title -> card_id
 
+        # Create cards
         for card_data in demo_cards:
             tag_list = [t.strip() for t in card_data.get("tags", []) if t.strip()] if card_data.get("tags") else None
-            
-            # Add due date description to cards without it
             due_date = card_data.get("due_date")
-            if due_date:
-                desc = (card_data.get("description", "") + f"\n   📅 Due: {due_date}")
-            else:
-                desc = card_data.get("description", "")
+            desc = (card_data.get("description", "") + f"\n   📅 Due: {due_date}") if due_date else card_data.get("description", "")
 
-            # Track tags
             for tag in tag_list or []:
                 tags_set.add(tag)
 
-            # Create the card
-            card_id = create_card(db_path, board_id, 
+            card_id = create_card(db_path, board_id,
                                   title=card_data["title"],
                                   column_name=card_data["column"],
                                   description=desc,
                                   tags=tag_list or None)
+            created_cards[card_data["title"]] = card_id
 
-            # Add a comment to 2 cards (To Do: Fix TUI and Document CLI)
+            # Add comments to specific To Do cards
             if card_data["column"] == "To Do" and card_data["title"] in ["Fix TUI column layout", "Document CLI commands"]:
-                add_comment(db_path, card_id, "Demo Bot", f"🔨 TODO: Address this during demo. Priority: {card_data.get('due_date', 'N/A')}")
+                add_comment(db_path, card_id, "Demo Bot",
+                            f"🔨 TODO: Address this during demo. Priority: {card_data.get('due_date', 'N/A')}")
                 comments_count += 1
 
-        # Create one dependency pair (In Progress: Review PR blocks In Progress: GitHub Issues)
-        review_pr_id = None
-        github_issues_id = None
-        for card_data in demo_cards:
-            title = card_data["title"]
-            if title == "Review PR #7 feedback":
-                review_pr_id = card_id
-            elif title == "Implement GitHub Issues import":
-                github_issues_id = card_id
-
+        # Create one dependency pair: Review PR #7 feedback -> blocks -> Implement GitHub Issues import
+        review_pr_id = created_cards.get("Review PR #7 feedback")
+        github_issues_id = created_cards.get("Implement GitHub Issues import")
         if review_pr_id and github_issues_id:
             add_dependency(db_path, review_pr_id, github_issues_id)
+            dependency_created = True
             click.echo(f"  🔗 Dependency created: {review_pr_id} blocks {github_issues_id}")
-        
+
         # Print summary
         click.echo("\n" + "="*60)
         click.echo(click.style("✅ Demo board seeded!", fg="bright_green", bold=True))
         click.echo(f"   📋 Columns: {len(standard_col_names)} ({', '.join(standard_col_names)})")
-        click.echo(f"   🎴 Cards: 14 distributed across columns")
+        click.echo(f"   🎴 Cards: {len(demo_cards)} distributed across columns")
         click.echo(f"   🏷️  Tags: {sorted(tags_set) if tags_set else 'none'}")
         click.echo(f"   💬 Comments added: {comments_count}")
-        click.echo(f"   🔗 Dependencies created: {'Yes' if dependency_created else 'No (yet)'}")
+        click.echo(f"   🔗 Dependencies created: {'Yes' if dependency_created else 'No'}")
         click.echo("="*60 + "\n")
 
     except KanbanError as e:
@@ -551,7 +477,6 @@ def demo(project, board, db_path):
     except Exception as e:
         click.echo(f"❌ Error: {e}", err=True)
         raise SystemExit(1)
-
 
 @cli.command()
 @click.option("--db-path", type=click.Path(), default=None,
