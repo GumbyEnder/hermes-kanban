@@ -24,7 +24,7 @@ class TestInitSchema:
         tables = [row["name"] for row in cursor.fetchall()]
         reset_connection()
 
-        expected = ["boards", "card_tags", "cards", "columns", "comments", "dependencies", "tags"]
+        expected = ["boards", "card_tags", "cards", "columns", "comments", "dependencies", "tags", "usage_events"]
         for table in expected:
             assert table in tables, f"Table '{table}' not found in {tables}"
 

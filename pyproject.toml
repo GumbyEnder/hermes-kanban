@@ -3,11 +3,14 @@ name = "hermes-kanban-sqlite"
 version = "0.1.1"
 description = "SQLite-backed Kanban CLI/TUI — real-time operational layer for hermes-kanban"
 readme = "docs/README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "textual>=0.47",
     "click>=8.1",
 ]
+
+[project.entry-points."hermes_agent.plugins"]
+kanban = "hermes_kanban_sqlite.hermes_plugin:register"
 
 [project.scripts]
 hermes-kanban-sqlite = "hermes_kanban_sqlite.cli:main"

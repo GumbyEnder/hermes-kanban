@@ -158,3 +158,57 @@ class TestArchiveCard:
         result = runner.invoke(cli_module.cli, ["archive", "1", "--yes"] + db)
         assert result.exit_code == 0
         assert "archived" in result.output.lower()
+
+
+class TestUsageCLI:
+    """Tests for the usage analytics commands."""
+
+    def test_usage_help(self):
+        """hermes-kanban-sqlite usage --help shows subcommands."""
+        result = runner.invoke(cli_module.cli, ["usage", "--help"])
+        assert result.exit_code == 0
+        assert "summary" in result.output
+        assert "report" in result.output
+        assert "heatmap" in result.output
+
+    def test_usage_summary_empty(self, tmp_path):
+        """summary on fresh DB shows zero totals."""
+        db = db_arg(tmp_path)
+        # init and add card, but no usage events
+        runner.invoke(cli_module.cli, ["init", "EmptyProject"] + db)
+        result = runner.invoke(cli_module.cli, ["usage", "summary"] + db)
+        assert result.exit_code == 0
+        assert "Total events" in result.output
+        assert "0" in result.output  # zero counts
+
+    def test_usage_report_by_model(self, tmp_path):
+        """report --by model aggregates data correctly."""
+        db = db_arg(tmp_path)
+        runner.invoke(cli_module.cli, ["init", "ReportProject"] + db)
+        # Seed usage events via Python API in same process using database fixture? Can't directly; use subprocess or call record_usage_event in test.
+        # Instead, we simulate by inserting directly using database functions.
+        from hermes_kanban_sqlite.database import record_usage_event, get_connection
+        from hermes_kanban_sqlite.kanban import create_board
+        board_id = create_board(str(tmp_path / "test.db"), "Board")
+        record_usage_event(str(tmp_path / "test.db"), "gpt-4", 100, 50, 0.002, board_id=board_id)
+        record_usage_event(str(tmp_path / "test.db"), "claude-3", 80, 40, 0.0018, board_id=board_id)
+
+        result = runner.invoke(cli_module.cli, ["usage", "report", "--by", "model"] + db)
+        assert result.exit_code == 0
+        assert "gpt-4" in result.output
+        assert "claude-3" in result.output
+        assert "0.002" in result.output or "0.0020" in result.output
+
+    def test_usage_heatmap_runs(self, tmp_path):
+        """heatmap command executes without error for a populated DB."""
+        from hermes_kanban_sqlite.database import record_usage_event, get_connection
+        from hermes_kanban_sqlite.kanban import create_board
+        db = db_arg(tmp_path)
+        runner.invoke(cli_module.cli, ["init", "HeatmapProject"] + db)
+        # Seed at least one usage event to ensure heatmap has data
+        board_id = create_board(str(tmp_path / "test.db"), "Board")
+        record_usage_event(str(tmp_path / "test.db"), "gpt-4", 10, 5, 0.0001, board_id=board_id)
+        result = runner.invoke(cli_module.cli, ["usage", "heatmap", "--days", "1"] + db)
+        assert result.exit_code == 0
+        assert "Activity Heatmap" in result.output
+        assert "Hour" in result.output

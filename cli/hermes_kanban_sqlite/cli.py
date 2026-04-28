@@ -35,7 +35,15 @@ from .kanban import (
     get_board_stats,
 )
 from .tui import run_tui
-from .sync import sync_to_obsidian
+from .sync import sync_to_obsidian, sync_from_obsidian, sync_daemon
+from .usage import (
+    get_cost_summary,
+    get_token_report,
+    get_activity_heatmap,
+    get_top_cards_by_tokens,
+    get_board_spend,
+)
+
 
 DEFAULT_DB_DIR = Path.home() / ".hermes"
 DEFAULT_DB_PATH = DEFAULT_DB_DIR / "kanban.db"
@@ -262,19 +270,53 @@ def tui(board, db_path):
 @click.option("--db-path", type=click.Path(), default=None, help="Custom database path")
 @click.option("--vault-dir", type=click.Path(), default="/mnt/nas/Obsidian Vault/Kanban", help="Obsidian vault Kanban directory")
 @click.option("--board", default=None, help="Board name to sync")
-def sync(db_path, vault_dir, board):
+@click.option("--dry-run", is_flag=True, default=False, help="Show changes without writing files")
+@click.option("--force", is_flag=True, default=False, help="Overwrite conflicts automatically")
+@click.option("--auto", is_flag=True, default=False, help="Run as daemon: continuous bidirectional sync")
+@click.option("--interval", type=int, default=5, help="Daemon poll interval in minutes (default 5)")
+def sync(db_path, vault_dir, board, dry_run, force, auto, interval):
+    """Sync SQLite ↔ Obsidian Kanban boards with conflict detection."""
     if db_path is None:
         db_path = _get_db_path()
     if not Path(db_path).exists():
         click.echo(f"No database at {db_path}", err=True)
         raise SystemExit(1)
-    click.echo("Syncing SQLite → Obsidian...")
-    result = sync_to_obsidian(db_path, vault_dir, board)
-    if result["errors"]:
-        for err in result["errors"]:
-            click.echo(f"  Warning: {err}", err=True)
-    click.echo(f"Synced {result['cards_synced']} cards across {result['columns_synced']} columns")
-    click.echo(f"Board file: {result['board_file']}")
+
+    if auto:
+        click.echo(f"Starting bidirectional sync daemon (interval {interval} min) — Ctrl+C to stop")
+        try:
+            sync_daemon(db_path, vault_dir, board, interval_minutes=interval)
+        except KeyboardInterrupt:
+            click.echo("\nDaemon stopped.")
+        return
+
+    # Single-shot bidirectional sync: push then pull
+    click.echo("=== SQLite → Obsidian ===")
+    result_push = sync_to_obsidian(db_path, vault_dir, board, dry_run=dry_run, force=force)
+    for w in result_push.get("warnings", []):
+        click.echo(f"  Warning: {w}")
+    for e in result_push.get("errors", []):
+        click.echo(f"  Error: {e}", err=True)
+    if dry_run:
+        click.echo(f"[dry-run] Would write {result_push['would_write']['size_bytes']} bytes (hash {result_push['would_write']['hash']})")
+    else:
+        click.echo(f"Synced {result_push['cards_synced']} cards across {result_push['columns_synced']} columns")
+        if result_push.get("board_file"):
+            click.echo(f"Board file: {result_push['board_file']}")
+        if result_push["conflicts"]:
+            click.echo("  Conflict(s) detected during push; use --force to overwrite", err=True)
+
+    if not dry_run and not result_push["errors"]:
+        click.echo("")
+        click.echo("=== Obsidian → SQLite ===")
+        result_pull = sync_from_obsidian(db_path, vault_dir, board, dry_run=False)
+        for w in result_pull.get("warnings", []):
+            click.echo(f"  Warning: {w}")
+        for e in result_pull.get("errors", []):
+            click.echo(f"  Error: {e}", err=True)
+        click.echo(f"Created: {result_pull['cards_created']}, Updated: {result_pull['cards_updated']}, Conflicts skipped: {result_pull['conflicts_skipped']}")
+    else:
+        click.echo("Skipping pull due to dry run or push errors")
 
 # ---------- demo ----------
 @click.command()
@@ -372,6 +414,132 @@ def demo(project, board, db_path):
         click.echo(f"Error: {e}", err=True)
         raise SystemExit(1)
 
+
+
+
+
+# ---------- usage analytics ----------
+@click.group(name="usage", help="Token & cost analytics")
+def usage():
+    """Usage analytics: view LLM token spend and cost trends."""
+    pass
+
+
+@usage.command("summary", help="Cost & token totals (default: last 30 days)")
+@click.option("--db-path", type=click.Path(), default=None, help="Custom database path")
+@click.option("--days", type=int, default=30, help="Lookback window in days")
+def usage_summary(db_path, days):
+    if db_path is None:
+        from .cli import _get_db_path
+        db_path = _get_db_path()
+    try:
+        from .usage import get_cost_summary
+        summary = get_cost_summary(db_path, days=days)
+        click.echo(f"\n{'='*50}")
+        click.echo(click.style(f"Usage Summary — Last {days} days", bold=True))
+        click.echo(f"{'='*50}")
+        click.echo(f"Total events : {summary['total_events']}")
+        click.echo(f"Total prompt tokens  : {summary['total_prompt_tokens']:,}")
+        click.echo(f"Total completion tokens: {summary['total_completion_tokens']:,}")
+        click.echo(f"Total cost    : ${summary['total_cost']:.4f}")
+        if summary["by_model"]:
+            click.echo("\nPer-model breakdown:")
+            click.echo(f"  {'Model':<25} {'Events':>8} {'Prompt':>12} {'Completion':>12} {'Cost':>10}")
+            click.echo(f"  {'-'*70}")
+            for model, data in sorted(summary["by_model"].items(), key=lambda x: -x[1]["cost"]):
+                click.echo(
+                    f"  {model:<25} {data['events']:>8} "
+                    f"{data['prompt_tokens']:>12,} {data['completion_tokens']:>12,} "
+                    f"${data['cost']:>9.4f}"
+                )
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
+
+
+@usage.command("report", help="Group usage by board, card, model, or day")
+@click.option("--db-path", type=click.Path(), default=None, help="Custom database path")
+@click.option("--by", "group_by", type=click.Choice(["board", "card", "model", "day"]), default="board", help="Grouping dimension")
+@click.option("--days", type=int, default=30, help="Lookback window")
+def usage_report(db_path, group_by, days):
+    if db_path is None:
+        from .cli import _get_db_path
+        db_path = _get_db_path()
+    try:
+        from .usage import get_token_report
+        rows = get_token_report(db_path, group_by=group_by, days=days)
+        if not rows:
+            click.echo("No usage data for this period.")
+            return
+        click.echo(f"\n{'='*60}")
+        click.echo(click.style(f"Usage Report — grouped by {group_by} (last {days} days)", bold=True))
+        click.echo(f"{'='*60}")
+        if group_by == "board":
+            click.echo(f"  {'Board Name':<30} {'Events':>8} {'Prompt':>12} {'Completion':>12} {'Cost':>10}")
+            click.echo(f"  {'-'*75}")
+            for r in rows:
+                click.echo(
+                    f"  {r.get('board_name') or 'Unassigned':<30} {r['events']:>8} "
+                    f"{r['prompt_tokens']:>12,} {r['completion_tokens']:>12,} ${r['cost']:>9.4f}"
+                )
+        elif group_by == "card":
+            click.echo(f"  {'Card (Board)':<40} {'Events':>8} {'Tokens':>12} {'Cost':>10}")
+            click.echo(f"  {'-'*75}")
+            for r in rows:
+                label = f"{r['card_title']} ({r['board_name']})"
+                click.echo(
+                    f"  {label:<40} {r['events']:>8} "
+                    f"{r['prompt_tokens']+r['completion_tokens']:>12,} ${r['cost']:>9.4f}"
+                )
+        elif group_by == "model":
+            click.echo(f"  {'Model':<25} {'Events':>8} {'Prompt':>12} {'Completion':>12} {'Cost':>10}")
+            click.echo(f"  {'-'*70}")
+            for r in rows:
+                click.echo(
+                    f"  {r['model']:<25} {r['events']:>8} "
+                    f"{r['prompt_tokens']:>12,} {r['completion_tokens']:>12,} ${r['cost']:>9.4f}"
+                )
+        elif group_by == "day":
+            click.echo(f"  {'Date':<12} {'Events':>8} {'Prompt':>12} {'Completion':>12} {'Cost':>10}")
+            click.echo(f"  {'-'*60}")
+            for r in rows:
+                click.echo(
+                    f"  {r['day']:<12} {r['events']:>8} "
+                    f"{r['prompt_tokens']:>12,} {r['completion_tokens']:>12,} ${r['cost']:>9.4f}"
+                )
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
+
+
+@usage.command("heatmap", help="ASCII heatmap of activity by hour/day")
+@click.option("--db-path", type=click.Path(), default=None, help="Custom database path")
+@click.option("--days", type=int, default=7, help="Lookback window in days")
+def usage_heatmap(db_path, days):
+    if db_path is None:
+        from .cli import _get_db_path
+        db_path = _get_db_path()
+    try:
+        from .usage import get_activity_heatmap
+        data = get_activity_heatmap(db_path, days=days)
+        if not data:
+            click.echo("No activity data for the period.")
+            return
+        from collections import defaultdict
+        buckets = defaultdict(int)
+        for r in data:
+            buckets[(r["day"], r["hour"])] = r["events"]
+        days_sorted = sorted(set(r["day"] for r in data))
+        click.echo(f"\nActivity Heatmap — events by day/hour (last {days} days)")
+        click.echo(f"  Hour | " + " ".join(f"{h:>3}" for h in range(24)))
+        click.echo(f"  {'-'*4} | " + "-"*(24*4))
+        for day in days_sorted:
+            row = [str(buckets.get((day, h), 0)).rjust(3) for h in range(24)]
+            click.echo(f"  {day} | " + " ".join(row))
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
+
 # ---------- main ----------
 @click.group(invoke_without_command=True)
 @click.pass_context
@@ -401,6 +569,7 @@ cli.add_command(archive)
 cli.add_command(tui)
 cli.add_command(sync)
 cli.add_command(demo)
+cli.add_command(usage)
 
 def main():
     cli()
