@@ -334,35 +334,217 @@ def dependency(blocker_id, blocked_id, db_path):
 
 
 @cli.command()
-@click.argument("card_id", type=int)
-@click.option("--yes", is_flag=True, help="Skip confirmation prompt")
+@click.option("--project", default="Hermes Demo",
+              help="Board project name (default: 'Hermes Demo')")
+@click.option("--board", default="Main",
+              help="Board name for this demo (default: 'Main')")
 @click.option("--db-path", type=click.Path(), default=None,
-              help="Custom database path")
-def archive(card_id, yes, db_path):
-    """Archive (soft-delete) a card."""
+              help="Custom database path (default: ~/.hermes/kanban.db)")
+def demo(project, board, db_path):
+    """Seed a polished sample Kanban board for TUI demonstration.
+
+    PROJECT — Name of the board project (e.g. 'Hermes Demo', 'Project-X')
+    BOARD  — Name of the board within that project
+    """
     if db_path is None:
         db_path = _get_db_path()
 
     try:
-        card = get_card(db_path, card_id)
-        if not card:
-            click.echo(f"❌ Card {card_id} not found.", err=True)
-            return
-
-        if not yes:
-            click.confirm(
-                f"Archive card [{card_id}] '{card['title']}'?",
-                abort=True
+        # Get first existing board ID, or create new one
+        boards = list_boards(db_path)
+        
+        # Ensure columns exist (requires conn - define early)
+        conn = get_connection(db_path)
+        cursor = conn.cursor()
+        standard_col_names = [name for name, _, _, _ in STANDARD_COLUMNS]
+        missing_cols = [name for name in standard_col_names if name not in get_all_columns(db_path)]
+        
+        # Create board if needed
+        if not boards:
+            click.echo("🔧 No boards exist. Creating demo board...")
+            cursor.execute(
+                "INSERT INTO boards (name, description) VALUES (?, ?)",
+                (board or "Main", f"Demo board seeded by hermes-kanban-sqlite demo command")
             )
-
-        ok = archive_card(db_path, card_id)
-        if ok:
-            click.echo(f"✅ Card {card_id} archived.")
+            conn.commit()
+            # SQLite3 uses last_insert_rowid() instead of cursor.lastrowid
+            cursor.execute("SELECT last_insert_rowid()")  
+            row = cursor.fetchone()
+            if row:
+                board_id = row[0]
+            else:
+                board_id = 1  # Default fallback
         else:
-            click.echo(f"❌ Failed to archive card {card_id}.", err=True)
+            board_id = boards[0]["id"]  # Use first existing board
+        
+        # Ensure columns exist
+        if missing_cols:
+            click.echo(f"📋 Ensuring columns: {', '.join(missing_cols)}")
+            for name, desc, color, order in STANDARD_COLUMNS:
+                try:
+                    cursor.execute(
+                        "INSERT OR IGNORE INTO columns (name, description, color, sort_order) VALUES (?, ?, ?, ?)",
+                        (name, desc, color.lower(), order),
+                    )
+                except sqlite3.IntegrityError:
+                    pass
+        else:
+            click.echo("✅ Standard columns already exist")
+        conn.commit()
+        
+        # Seed 14 realistic cards with varied titles, tags, and metadata
+        demo_cards = [
+            # Column: Backlog (3 cards)
+            {
+                "title": "Design sync schema",
+                "column": "Backlog",
+                "description": "Create database schema for bidirectional sync between SQLite and external Kanban instances.",
+                "tags": ["backend", "devops"],
+                "due_date": "2026-05-13",
+            },
+            {
+                "title": "Investigate DB lock contention",
+                "column": "Backlog",
+                "description": "Profile SQLite connection pool and identify deadlock scenarios under concurrent TUI access.",
+                "tags": ["backend", "devops"],
+                "due_date": "2026-05-18",
+            },
+            {
+                "title": "Create board templates API",
+                "column": "Backlog",
+                "description": "Build REST endpoints to create pre-configured Kanban boards with columns and default cards.",
+                "tags": ["backend", "devops"],
+            },
+            # Column: To Do (4 cards)
+            {
+                "title": "Fix TUI column layout",
+                "column": "To Do",
+                "description": "Adjust column widths so 'Blocked' and 'Done' fit properly in the Textual render.",
+                "tags": ["frontend", "ui/ux"],
+                "due_date": "2026-05-08",
+            },
+            {
+                "title": "Add auto-refresh to TUI",
+                "column": "To Do",
+                "description": "Implement polling for new cards/columns without requiring manual redraw trigger.",
+                "tags": ["frontend", "devops"],
+                "due_date": "2026-05-15",
+            },
+            {
+                "title": "Write sync bridge tests",
+                "column": "To Do",
+                "description": "Add pytest coverage for the sync_to_obsidian function with edge cases.",
+                "tags": ["frontend", "qa"],
+                "due_date": "2026-05-10",
+            },
+            {
+                "title": "Document CLI commands",
+                "column": "To Do",
+                "description": "Expand README with examples for add, move, info, and dependency subcommands.",
+                "tags": ["docs", "qa"],
+                "due_date": "2026-05-12",
+            },
+            # Column: In Progress (4 cards)
+            {
+                "title": "Review PR #7 feedback",
+                "column": "In Progress",
+                "description": "Address code review comments around database connection pooling in kanban.py.",
+                "tags": ["frontend", "backend"],
+                "due_date": "2026-05-09",
+            },
+            {
+                "title": "Benchmark SQLite performance",
+                "column": "In Progress",
+                "description": "Run load tests with 100+ cards across columns to identify scaling bottlenecks.",
+                "tags": ["backend", "devops"],
+                "due_date": "2026-05-20",
+            },
+            {
+                "title": "Implement GitHub Issues import",
+                "column": "In Progress",
+                "description": "Create parser to extract issue data from GitHub API and create Kanban cards.",
+                "tags": ["backend", "devops"],
+                "due_date": "2026-05-14",
+            },
+            {
+                "title": "Update CI/CD pipeline",
+                "column": "In Progress",
+                "description": "Add automated deployment workflow for hermes-kanban-sqlite releases.",
+                "tags": ["devops", "backend"],
+                "due_date": "2026-05-19",
+            },
+            # Column: Review (3 cards)
+            {
+                "title": "Deploy to Cloudflare",
+                "column": "Review",
+                "description": "Set up Cloudflare Pages deployment for web-based Kanban demo.",
+                "tags": ["devops", "frontend"],
+                "due_date": "2026-05-11",
+            },
+            {
+                "title": "Blocked: API gateway routing",
+                "column": "Review",
+                "description": "Configure Cloudflare Workers to route Kanban webhook events.",
+                "tags": ["devops", "backend"],
+                "is_blocked": True,
+            },
+        ]
 
-    except click.Abort:
-        click.echo("Cancelled.")
+        # Track summary stats
+        tags_set = set()
+        comments_count = 0
+        dependency_created = False
+
+        for card_data in demo_cards:
+            tag_list = [t.strip() for t in card_data.get("tags", []) if t.strip()] if card_data.get("tags") else None
+            
+            # Add due date description to cards without it
+            due_date = card_data.get("due_date")
+            if due_date:
+                desc = (card_data.get("description", "") + f"\n   📅 Due: {due_date}")
+            else:
+                desc = card_data.get("description", "")
+
+            # Track tags
+            for tag in tag_list or []:
+                tags_set.add(tag)
+
+            # Create the card
+            card_id = create_card(db_path, board_id, 
+                                  title=card_data["title"],
+                                  column_name=card_data["column"],
+                                  description=desc,
+                                  tags=tag_list or None)
+
+            # Add a comment to 2 cards (To Do: Fix TUI and Document CLI)
+            if card_data["column"] == "To Do" and card_data["title"] in ["Fix TUI column layout", "Document CLI commands"]:
+                add_comment(db_path, card_id, "Demo Bot", f"🔨 TODO: Address this during demo. Priority: {card_data.get('due_date', 'N/A')}")
+                comments_count += 1
+
+        # Create one dependency pair (In Progress: Review PR blocks In Progress: GitHub Issues)
+        review_pr_id = None
+        github_issues_id = None
+        for card_data in demo_cards:
+            title = card_data["title"]
+            if title == "Review PR #7 feedback":
+                review_pr_id = card_id
+            elif title == "Implement GitHub Issues import":
+                github_issues_id = card_id
+
+        if review_pr_id and github_issues_id:
+            add_dependency(db_path, review_pr_id, github_issues_id)
+            click.echo(f"  🔗 Dependency created: {review_pr_id} blocks {github_issues_id}")
+        
+        # Print summary
+        click.echo("\n" + "="*60)
+        click.echo(click.style("✅ Demo board seeded!", fg="bright_green", bold=True))
+        click.echo(f"   📋 Columns: {len(standard_col_names)} ({', '.join(standard_col_names)})")
+        click.echo(f"   🎴 Cards: 14 distributed across columns")
+        click.echo(f"   🏷️  Tags: {sorted(tags_set) if tags_set else 'none'}")
+        click.echo(f"   💬 Comments added: {comments_count}")
+        click.echo(f"   🔗 Dependencies created: {'Yes' if dependency_created else 'No (yet)'}")
+        click.echo("="*60 + "\n")
+
     except KanbanError as e:
         click.echo(f"❌ {e}", err=True)
         raise SystemExit(1)
@@ -396,6 +578,44 @@ def sync(db_path, vault_dir, board):
 
     click.echo(f"✅ Synced {result['cards_synced']} cards across {result['columns_synced']} columns")
     click.echo(f"📄 Board: {result['board_file']}")
+
+
+@cli.command()
+@click.argument("card_id", type=int)
+@click.option("--yes", is_flag=True, help="Skip confirmation prompt")
+@click.option("--db-path", type=click.Path(), default=None,
+              help="Custom database path (default: ~/.hermes/kanban.db)")
+def archive(card_id, yes, db_path):
+    """Archive (soft-delete) a card."""
+    if db_path is None:
+        db_path = _get_db_path()
+
+    try:
+        card = get_card(db_path, card_id)
+        if not card:
+            click.echo(f"❌ Card {card_id} not found.", err=True)
+            return
+
+        if not yes:
+            click.confirm(
+                f"Archive card [{card_id}] '{card['title']}'?",
+                abort=True
+            )
+
+        ok = archive_card(db_path, card_id)
+        if ok:
+            click.echo(f"✅ Card {card_id} archived.")
+        else:
+            click.echo(f"❌ Failed to archive card {card_id}.", err=True)
+
+    except click.Abort:
+        click.echo("Cancelled.")
+    except KanbanError as e:
+        click.echo(f"❌ {e}", err=True)
+        raise SystemExit(1)
+    except Exception as e:
+        click.echo(f"❌ Error: {e}", err=True)
+        raise SystemExit(1)
 
 
 @cli.command()
