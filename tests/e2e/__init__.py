@@ -1,0 +1,1 @@
+# E2E test suite for hermes-kanban

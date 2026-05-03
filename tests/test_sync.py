@@ -4,7 +4,7 @@ from pathlib import Path
 from hermes_kanban_sqlite.database import init_schema, reset_connection
 from hermes_kanban_sqlite.kanban import create_board, create_card
 from hermes_kanban_sqlite.sync import sync_to_obsidian
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 OBSIDIAN_FRONTMATTER = """---
 kanban-plugin: board
@@ -209,7 +209,7 @@ class TestSyncPull:
 
         board_file = Path(vault) / "UpdateBoard.md"
         board_file.parent.mkdir(parents=True, exist_ok=True)
-        newer = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+        newer = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
         board_file.write_text(
             "---\nkanban-plugin: board\n---\n\n"
             "# UpdateBoard\n\n"
@@ -239,14 +239,14 @@ class TestSyncPull:
         from hermes_kanban_sqlite.database import get_connection
         conn = get_connection(db_path)
         cur = conn.cursor()
-        future_ts = (datetime.utcnow() + timedelta(seconds=60)).strftime("%Y-%m-%dT%H:%M:%S")
+        future_ts = (datetime.now(timezone.utc) + timedelta(seconds=60)).strftime("%Y-%m-%dT%H:%M:%S")
         cur.execute("UPDATE cards SET updated_at = ? WHERE id = ?", (future_ts, card_id))
         conn.commit()
 
         board_file = Path(vault) / "SkipBoard.md"
         board_file.parent.mkdir(parents=True, exist_ok=True)
         # Use a timestamp older than DB's updated_at
-        old_ts = (datetime.utcnow() - timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%S")
+        old_ts = (datetime.now(timezone.utc) - timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%S")
         board_file.write_text(
             "---\nkanban-plugin: board\n---\n\n"
             "# SkipBoard\n\n"

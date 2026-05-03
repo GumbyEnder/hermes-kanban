@@ -57,11 +57,11 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pytest click textual
+          pip install pytest click textual pytest-cov
           pip install -e .
 
       - name: Run Python tests
-        run: python -m pytest tests/ -v
+        run: python -m pytest tests/ -v -k "not tui" --cov=cli/hermes_kanban_sqlite --cov-report=term-missing
 
       - name: Lint Python
         run: python -m py_compile cli/hermes_kanban_sqlite/*.py

@@ -1,6 +1,6 @@
 # Hermes Kanban Bridge — REST API Reference
 
-**Version:** 1.2.0
+**Version:** 1.8.0
 Base URL: `http://localhost:27124` (port configurable in plugin settings)
 
 All responses are JSON. Write operations return `{ ok: true, ... }` or `{ ok: false, error: "..." }`.

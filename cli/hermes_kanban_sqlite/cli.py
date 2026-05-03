@@ -330,8 +330,6 @@ def demo(project, board, db_path):
         boards = list_boards(db_path)
         conn = get_connection(db_path)
         cursor = conn.cursor()
-        standard_col_names = [name for name, _, _, _ in STANDARD_COLUMNS]
-        missing_cols = [name for name in standard_col_names if name not in get_all_columns(db_path, board_id)]
         if not boards:
             click.echo("Creating demo board...")
             cursor.execute("INSERT INTO boards (name, description) VALUES (?, ?)", (board or project, "Demo board seeded by hermes-kanban-sqlite demo"))
@@ -344,6 +342,8 @@ def demo(project, board, db_path):
                 board_id = _resolve_board_id(db_path, board)
             else:
                 board_id = boards[0]["id"]
+        standard_col_names = [name for name, _, _, _ in STANDARD_COLUMNS]
+        missing_cols = [name for name in standard_col_names if name not in get_all_columns(db_path, board_id)]
         if missing_cols:
             click.echo(f"Ensuring columns: {', '.join(missing_cols)}")
             for name, desc, color, order in STANDARD_COLUMNS:

@@ -12,7 +12,7 @@ import hashlib
 import json
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, List, Any
 from threading import Event, Thread
@@ -203,7 +203,7 @@ def sync_to_obsidian(
             lines.append(f"    - **{ID_FIELD}**: {card['id']}")
             lines.append(f"    - **{STATUS_FIELD}**: {card.get('status', 'active')}")
             lines.append(f"    - **{CREATED_FIELD}**: {card.get('created_at', '')}")
-            updated = card.get("updated_at") or datetime.utcnow().isoformat()
+            updated = card.get("updated_at") or datetime.now(timezone.utc).isoformat()
             lines.append(f"    - **{UPDATED_FIELD}**: {updated}")
             lines.append("")
         result["columns_synced"] += 1
@@ -234,7 +234,7 @@ def sync_to_obsidian(
         _upsert_sync_meta(
             db_path,
             board_id,
-            last_sqlite_sync=datetime.utcnow().isoformat(),
+            last_sqlite_sync=datetime.now(timezone.utc).isoformat(),
             last_file_mtime=mtime,
             file_hash=file_hash,
             version=(meta.get("version", 0) + 1) if meta else 1,
@@ -345,7 +345,7 @@ def sync_from_obsidian(
             columns_db[col_name] = column_id
             result["warnings"].append(f"Created missing column '{col_name}'")
 
-    now_ts = datetime.utcnow().isoformat()
+    now_ts = datetime.now(timezone.utc).isoformat()
 
     for col in parsed["columns"]:
         col_name = col["name"]
@@ -430,7 +430,7 @@ def sync_from_obsidian(
             _upsert_sync_meta(
                 db_path,
                 board_id,
-                last_obsidian_sync=datetime.utcnow().isoformat(),
+                last_obsidian_sync=datetime.now(timezone.utc).isoformat(),
             )
         except Exception as e:
             result["warnings"].append(f"Failed to update sync_metadata (pull): {e}")

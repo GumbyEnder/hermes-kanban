@@ -1,6 +1,6 @@
 [project]
 name = "hermes-kanban-sqlite"
-version = "0.1.1"
+version = "1.8.0"
 description = "SQLite-backed Kanban CLI/TUI — real-time operational layer for hermes-kanban"
 readme = "docs/README.md"
 requires-python = ">=3.11"
@@ -24,3 +24,18 @@ package-dir = {"" = "cli"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "e2e: End-to-end tests (requires real CLI binary subprocess or mock server)",
+    "tui: TUI smoke tests (requires PTY/TTY)",
+]
+
+[tool.coverage.run]
+source = ["cli/hermes_kanban_sqlite"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]

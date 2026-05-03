@@ -185,6 +185,36 @@ See `docs/demo/Q3-Launch.md` for a sample Kanban board you can drop into your va
 
 ---
 
+## Testing
+
+**105 tests passing, zero regressions.** Coverage: **55%** overall (kanban 87%, sync 82%, usage 89%).
+
+| Suite | Tests | Description |
+|-------|-------|-------------|
+| Unit | 59 | Database schema, kanban logic, CLI (Click runner), sync, usage analytics |
+| E2E — CLI workflows | 22 | Real subprocess invocation: full lifecycle (init→add→move→info→comment→dependency→archive), demo, usage, sync, error handling, multi-board |
+| E2E — TUI smoke | 4 | Headless PTY: Textual TUI launches, renders header/columns/cards, clean shutdown via `q` and EOF |
+| E2E — Mock API | 20 | Stdlib mock server implements all 15+ REST endpoints from `docs/API.md` — boards, cards, query, rituals, templates, notifications |
+
+```bash
+# All tests
+pytest tests/
+
+# E2E only
+pytest tests/e2e/
+
+# Skip slow TUI tests
+pytest tests/e2e/ -k "not tui"
+```
+
+The mock API server (`tests/e2e/mock_api_server.py`) exercises the full REST surface without requiring a running Obsidian instance, making it suitable for CI.
+
+### Bug Found & Fixed
+
+E2E testing uncovered a bug in the `demo` command where `board_id` was referenced before assignment, causing `UnboundLocalError`. The `missing_cols` computation was moved to after the board ID is properly resolved.
+
+---
+
 ## License
 
 MIT — see LICENSE file.

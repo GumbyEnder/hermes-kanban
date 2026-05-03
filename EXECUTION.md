@@ -233,6 +233,7 @@ All write endpoints return `{ ok: true, message: string }` or `{ ok: false, erro
 | 2026-04-24 | Bump to v1.1.0 — velocity report, due date notifications, notification scheduler | Frodo |
 | 2026-04-24 | Phase 4 integration testing complete — standup, move, query, review, fallback all pass | Frodo |
 | 2026-04-24 | GitHub release v1.1.0 tagged and pushed | Frodo |
+| 2026-05-02 | Bump to v1.8.0 — 46 E2E tests (CLI workflow, TUI smoke, mock API), coverage at 55%, utcnow() deprecations fixed, kanban boards tidied, CI excludes TUI, pytest-cov integrated | Frodo |
 
 ---
 

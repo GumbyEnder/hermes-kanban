@@ -4,7 +4,7 @@ Usage analytics module — cost & token reporting for Kanban boards.
 Functions operate on a SQLite database (same file as kanban data).
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, List, Any
 from .database import get_connection
 
@@ -26,8 +26,8 @@ def get_cost_summary(
     conn = get_connection(db_path)
     cursor = conn.cursor()
 
-    start = (datetime.utcnow() - timedelta(days=days)).isoformat()
-    end = datetime.utcnow().isoformat()
+    start = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    end = datetime.now(timezone.utc).isoformat()
 
     where_clause = "timestamp >= ? AND timestamp <= ?"
     params = [start, end]
@@ -84,8 +84,8 @@ def get_token_report(
     conn = get_connection(db_path)
     cursor = conn.cursor()
 
-    start = (datetime.utcnow() - timedelta(days=days)).isoformat()
-    end = datetime.utcnow().isoformat()
+    start = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    end = datetime.now(timezone.utc).isoformat()
 
     if group_by == "board":
         query = """
@@ -164,8 +164,8 @@ def get_activity_heatmap(
     conn = get_connection(db_path)
     cursor = conn.cursor()
 
-    start = (datetime.utcnow() - timedelta(days=days)).isoformat()
-    end = datetime.utcnow().isoformat()
+    start = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    end = datetime.now(timezone.utc).isoformat()
 
     query = """
         SELECT
@@ -192,8 +192,8 @@ def get_top_cards_by_tokens(
     conn = get_connection(db_path)
     cursor = conn.cursor()
 
-    start = (datetime.utcnow() - timedelta(days=days)).isoformat()
-    end = datetime.utcnow().isoformat()
+    start = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    end = datetime.now(timezone.utc).isoformat()
 
     query = """
         SELECT

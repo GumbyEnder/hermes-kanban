@@ -88,7 +88,7 @@ export class McpAdapter {
         result: {
           protocolVersion: '2024-11-05',
           capabilities: { tools: {} },
-          serverInfo: { name: 'hermes-kanban-bridge', version: '1.0.0' },
+          serverInfo: { name: 'hermes-kanban-bridge', version: '1.8.0' },
         }
       };
     }
@@ -129,7 +129,7 @@ export class McpAdapter {
   private async callTool(name: string, args: any): Promise<any> {
     switch (name) {
       case 'kanban_health':
-        return { ok: true, status: 'running', port: this.settings.port, version: '1.0.0' };
+        return { ok: true, status: 'running', port: this.settings.port, version: '1.8.0' };
 
       case 'kanban_list_boards':
         return await this.parser.listBoards(this.settings.boardFolder);

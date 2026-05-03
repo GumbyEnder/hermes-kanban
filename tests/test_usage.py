@@ -1,7 +1,7 @@
 """Tests for usage analytics module."""
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from hermes_kanban_sqlite.database import (
     init_schema,
     get_connection,
@@ -131,7 +131,7 @@ class TestUsageAnalytics:
         init_schema(db_path)
         board_id = create_board(db_path, "Board")
 
-        today = datetime.utcnow().date().isoformat()
+        today = datetime.now(timezone.utc).date().isoformat()
         # Record one event at specific hour is tracked by DB automatically via timestamp
         record_usage_event(db_path, "gpt-4", 10, 5, 0.0001, board_id=board_id)
 
