@@ -171,6 +171,21 @@ class TestMockAPIIntegration:
         assert status == 200
         assert data["card"]["column"] == "In Progress"
 
+    def test_move_card_accepts_legacy_target_column(self):
+        res = _api("POST", "/boards", {"title": "Legacy Move Board"})
+        board_id = res[1]["board"]["id"]
+        _api("POST", "/cards", {
+            "boardId": board_id, "column": "To Do", "title": "Legacy Move Me"
+        })
+
+        status, data = _api("POST", "/cards/move", {
+            "cardId": f"{board_id}::To Do::Legacy Move Me",
+            "targetColumn": "Done",
+        })
+
+        assert status == 200
+        assert data["card"]["column"] == "Done"
+
     # ── Query ───────────────────────────────────────────────────
 
     def test_query_by_board(self):

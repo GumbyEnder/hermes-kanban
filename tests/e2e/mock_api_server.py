@@ -197,7 +197,11 @@ class MockKanbanHandler(BaseHTTPRequestHandler):
 
     def _handle_move_card(self, body: dict):
         card_id = body.get("cardId", "")
-        to_column = body.get("toColumn", "")
+        # Support the original REST field while current clients use toColumn.
+        to_column = body.get("toColumn") or body.get("targetColumn", "")
+        if not isinstance(to_column, str) or not to_column.strip():
+            self._send_json({"ok": False, "error": "A non-empty toColumn is required"}, 400)
+            return
 
         decoded = urllib.parse.unquote(card_id)
         parts = decoded.split("::")

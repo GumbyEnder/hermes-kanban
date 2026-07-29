@@ -96,7 +96,14 @@ export class KanbanParser {
     return { ok: true, card: { id, title: body.title, column: body.column, boardId: body.boardId } };
   }
 
-  async moveCard(body: { cardId: string; toColumn: string }): Promise<{ ok: boolean; message?: string; error?: string }> {
+  async moveCard(body: { cardId: string; toColumn?: string; targetColumn?: string }): Promise<{ ok: boolean; message?: string; error?: string }> {
+    // targetColumn was the original REST field. Keep it as a compatibility alias
+    // while all current clients and MCP tools use toColumn.
+    const destination = body.toColumn ?? body.targetColumn;
+    if (typeof destination !== 'string' || !destination.trim()) {
+      return { ok: false, error: 'A non-empty toColumn is required' };
+    }
+
     const [boardId, fromColumn, ...titleParts] = body.cardId.split('::');
     const title = titleParts.join('::');
     const file = this.app.vault.getAbstractFileByPath(normalizePath(boardId));
@@ -122,9 +129,9 @@ export class KanbanParser {
     }
 
     lines.splice(cardLineIdx, 1);
-    const updated = this.insertCardIntoColumn(lines.join('\n'), body.toColumn, cardLine);
+    const updated = this.insertCardIntoColumn(lines.join('\n'), destination, cardLine);
     await this.app.vault.modify(file, updated);
-    return { ok: true, message: `Moved "${title}" from "${fromColumn}" to "${body.toColumn}"` };
+    return { ok: true, message: `Moved "${title}" from "${fromColumn}" to "${destination}"` };
   }
 
   async updateCard(cardId: string, body: Partial<KanbanCard>): Promise<{ ok: boolean; message?: string; error?: string }> {
