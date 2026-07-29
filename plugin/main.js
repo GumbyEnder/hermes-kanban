@@ -697,6 +697,9 @@ var DEFAULT_SETTINGS = {
   trustMode: "confirm",
   enabled: true,
   mcpEnabled: false,
+  executionProvider: "legacy-markdown",
+  hermesNativeBaseUrl: "http://127.0.0.1:9120",
+  hermesNativeAllowRemote: false,
   notificationInterval: 15,
   githubToken: "",
   githubOwner: "",
@@ -1223,6 +1226,172 @@ var McpAdapter = class {
   }
 };
 
+// src/hermes-native-provider.ts
+var KNOWN_TASK_FIELDS = /* @__PURE__ */ new Set([
+  "id",
+  "board_id",
+  "boardId",
+  "title",
+  "body",
+  "status",
+  "assignee",
+  "priority",
+  "tenant",
+  "blocker",
+  "block_reason",
+  "result"
+]);
+var KNOWN_BOARD_FIELDS = /* @__PURE__ */ new Set([
+  "slug",
+  "id",
+  "name",
+  "description",
+  "icon",
+  "updated_at",
+  "updatedAt",
+  "tasks",
+  "total",
+  "counts"
+]);
+var HermesNativeProvider = class {
+  constructor(settings) {
+    this.kind = "hermes-native";
+    this.cache = /* @__PURE__ */ new Map();
+    var _a;
+    const parsed = new URL(settings.baseUrl);
+    const isLoopback = parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost" || parsed.hostname === "[::1]";
+    if (!isLoopback && !settings.allowRemote) {
+      throw new Error("Hermes native provider only permits loopback endpoints unless allowRemote is explicitly enabled.");
+    }
+    this.baseUrl = settings.baseUrl.replace(/\/$/, "");
+    this.timeoutMs = (_a = settings.timeoutMs) != null ? _a : 5e3;
+  }
+  async health() {
+    try {
+      await this.request("/api/plugins/kanban/boards");
+      return { ok: true, fetchedAt: (/* @__PURE__ */ new Date()).toISOString() };
+    } catch (error) {
+      return { ok: false, message: this.errorMessage(error), fetchedAt: null };
+    }
+  }
+  async listBoards() {
+    return (await this.listBoardsWithState()).value;
+  }
+  async listBoardsWithState() {
+    return this.readWithCache("boards", async () => {
+      var _a;
+      const payload = await this.request("/api/plugins/kanban/boards");
+      return ((_a = payload.boards) != null ? _a : []).map((item) => this.mapBoard(item));
+    });
+  }
+  async getBoard(boardId) {
+    const key = `board:${boardId}`;
+    const result = await this.readWithCache(key, async () => {
+      var _a;
+      const payload = await this.request(`/api/plugins/kanban/board?board=${encodeURIComponent(boardId)}`);
+      const tasks = ((_a = payload.columns) != null ? _a : []).flatMap(
+        (column) => {
+          var _a2;
+          return ((_a2 = column.tasks) != null ? _a2 : []).map((task) => this.mapTask(task, boardId));
+        }
+      );
+      return { id: boardId, name: boardId, tasks };
+    });
+    return result.value;
+  }
+  async getTask(taskId, boardId) {
+    const key = `task:${boardId != null ? boardId : ""}:${taskId}`;
+    const result = await this.readWithCache(key, async () => {
+      var _a, _b, _c;
+      const suffix = boardId ? `?board=${encodeURIComponent(boardId)}` : "";
+      const payload = await this.request(`/api/plugins/kanban/tasks/${encodeURIComponent(taskId)}${suffix}`);
+      const task = this.mapTask((_a = payload.task) != null ? _a : {}, boardId);
+      task.comments = Array.isArray(payload.comments) ? payload.comments : [];
+      task.attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
+      task.runs = Array.isArray(payload.runs) ? payload.runs : [];
+      const links = payload.links;
+      task.links = { parents: (_b = links == null ? void 0 : links.parents) != null ? _b : [], children: (_c = links == null ? void 0 : links.children) != null ? _c : [] };
+      return task;
+    });
+    return result.value;
+  }
+  async listProfiles() {
+    var _a;
+    const payload = await this.request("/api/plugins/kanban/profiles");
+    return ((_a = payload.profiles) != null ? _a : []).map((profile) => {
+      var _a2;
+      const item = profile;
+      return {
+        name: String((_a2 = item.name) != null ? _a2 : ""),
+        description: typeof item.description === "string" ? item.description : void 0,
+        extensions: this.extensions(item, /* @__PURE__ */ new Set(["name", "description"]))
+      };
+    });
+  }
+  async request(path) {
+    const controller = new AbortController();
+    const timer = globalThis.setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await fetch(`${this.baseUrl}${path}`, { signal: controller.signal });
+      if (!response.ok)
+        throw new Error(`Hermes native API returned HTTP ${response.status}`);
+      return await response.json();
+    } finally {
+      globalThis.clearTimeout(timer);
+    }
+  }
+  async readWithCache(key, fetcher) {
+    try {
+      const value = await fetcher();
+      const fetchedAt = (/* @__PURE__ */ new Date()).toISOString();
+      this.cache.set(key, { value, fetchedAt });
+      return { value, stale: false, fetchedAt };
+    } catch (error) {
+      const cached = this.cache.get(key);
+      if (cached) {
+        return { value: cached.value, stale: true, fetchedAt: cached.fetchedAt, error: this.errorMessage(error) };
+      }
+      throw error;
+    }
+  }
+  mapBoard(item) {
+    var _a, _b, _c;
+    const id = String((_b = (_a = item.slug) != null ? _a : item.id) != null ? _b : "");
+    return {
+      id,
+      name: String((_c = item.name) != null ? _c : id),
+      description: typeof item.description === "string" ? item.description : void 0,
+      icon: typeof item.icon === "string" ? item.icon : void 0,
+      tasks: [],
+      updatedAt: typeof item.updated_at === "string" ? item.updated_at : void 0,
+      extensions: this.extensions(item, KNOWN_BOARD_FIELDS)
+    };
+  }
+  mapTask(item, boardId) {
+    var _a, _b, _c;
+    return {
+      id: String((_a = item.id) != null ? _a : ""),
+      boardId: boardId != null ? boardId : typeof item.board_id === "string" ? item.board_id : void 0,
+      title: String((_b = item.title) != null ? _b : ""),
+      body: typeof item.body === "string" ? item.body : void 0,
+      status: String((_c = item.status) != null ? _c : "todo"),
+      assignee: typeof item.assignee === "string" ? item.assignee : void 0,
+      priority: typeof item.priority === "number" || typeof item.priority === "string" ? item.priority : void 0,
+      tenant: typeof item.tenant === "string" ? item.tenant : void 0,
+      blocker: typeof item.block_reason === "string" ? item.block_reason : void 0,
+      result: typeof item.result === "string" ? item.result : void 0,
+      extensions: this.extensions(item, KNOWN_TASK_FIELDS)
+    };
+  }
+  extensions(item, known) {
+    const extensions = Object.fromEntries(Object.entries(item).filter(([key]) => !known.has(key)));
+    return Object.keys(extensions).length ? extensions : void 0;
+  }
+  errorMessage(error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+};
+
 // src/main.ts
 var PLUGIN_VERSION = "1.8.0";
 var HermesKanbanPlugin = class extends import_obsidian5.Plugin {
@@ -1231,6 +1400,12 @@ var HermesKanbanPlugin = class extends import_obsidian5.Plugin {
     this.settings = DEFAULT_SETTINGS;
     this.server = null;
     this.mcpAdapter = null;
+  }
+  nativeProvider() {
+    return new HermesNativeProvider({
+      baseUrl: this.settings.hermesNativeBaseUrl,
+      allowRemote: this.settings.hermesNativeAllowRemote
+    });
   }
   async onload() {
     await this.loadSettings();
@@ -1254,6 +1429,21 @@ var HermesKanbanPlugin = class extends import_obsidian5.Plugin {
           this.settings.enabled ? this.server.start() : this.server.stop();
           this.saveSettings();
         }
+      }
+    });
+    this.addCommand({
+      id: "check-native-hermes-connection",
+      name: "Check Native Hermes Kanban connection",
+      callback: async () => {
+        var _a;
+        if (this.settings.executionProvider !== "hermes-native") {
+          new import_obsidian5.Notice("Hermes Kanban Bridge is using Legacy Markdown mode. Select Native Hermes in settings first.");
+          return;
+        }
+        const health = await this.nativeProvider().health();
+        new import_obsidian5.Notice(
+          health.ok ? `Native Hermes Kanban connected: ${this.settings.hermesNativeBaseUrl}` : `Native Hermes Kanban unavailable: ${(_a = health.message) != null ? _a : "unknown error"}`
+        );
       }
     });
     this.addCommand({
@@ -1322,6 +1512,23 @@ var HermesKanbanSettingTab = class extends import_obsidian5.PluginSettingTab {
       this.plugin.settings.trustMode = value;
       await this.plugin.saveSettings();
     }));
+    containerEl.createEl("hr");
+    containerEl.createEl("h3", { text: "Execution Provider" });
+    new import_obsidian5.Setting(containerEl).setName("Execution backend").setDesc("Legacy Markdown keeps this plugin as the board engine. Native Hermes is an experimental read-only connection to Hermes Kanban; it does not yet write native tasks.").addDropdown((drop) => drop.addOption("legacy-markdown", "Legacy Markdown boards").addOption("hermes-native", "Native Hermes Kanban (experimental, read-only)").setValue(this.plugin.settings.executionProvider).onChange(async (value) => {
+      this.plugin.settings.executionProvider = value;
+      await this.plugin.saveSettings();
+      this.display();
+    }));
+    if (this.plugin.settings.executionProvider === "hermes-native") {
+      new import_obsidian5.Setting(containerEl).setName("Native Hermes endpoint").setDesc("Local dashboard endpoint. Loopback is required by default; remote transport is not yet supported.").addText((text) => text.setPlaceholder("http://127.0.0.1:9120").setValue(this.plugin.settings.hermesNativeBaseUrl).onChange(async (value) => {
+        this.plugin.settings.hermesNativeBaseUrl = value.trim();
+        await this.plugin.saveSettings();
+      }));
+      new import_obsidian5.Setting(containerEl).setName("Allow non-loopback endpoint").setDesc("Advanced unsafe override. Enable only after an authenticated native Hermes transport is available.").addToggle((toggle) => toggle.setValue(this.plugin.settings.hermesNativeAllowRemote).onChange(async (value) => {
+        this.plugin.settings.hermesNativeAllowRemote = value;
+        await this.plugin.saveSettings();
+      }));
+    }
     new import_obsidian5.Setting(containerEl).setName("Enable server").setDesc("Start the REST API server when Obsidian loads").addToggle((toggle) => toggle.setValue(this.plugin.settings.enabled).onChange(async (value) => {
       var _a, _b;
       this.plugin.settings.enabled = value;

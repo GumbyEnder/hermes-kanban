@@ -2,6 +2,7 @@ import { Plugin, PluginSettingTab, App, Setting, Notice } from 'obsidian';
 import { HermesKanbanSettings, DEFAULT_SETTINGS } from './settings';
 import { KanbanServer } from './server';
 import { McpAdapter } from './mcp-adapter';
+import { HermesNativeProvider } from './hermes-native-provider';
 
 // Keep this in sync with manifest.json and package.json version
 export const PLUGIN_VERSION = '1.8.0';
@@ -10,6 +11,13 @@ export default class HermesKanbanPlugin extends Plugin {
   settings: HermesKanbanSettings = DEFAULT_SETTINGS;
   server: KanbanServer | null = null;
   mcpAdapter: McpAdapter | null = null;
+
+  private nativeProvider(): HermesNativeProvider {
+    return new HermesNativeProvider({
+      baseUrl: this.settings.hermesNativeBaseUrl,
+      allowRemote: this.settings.hermesNativeAllowRemote,
+    });
+  }
 
   async onload() {
     await this.loadSettings();
@@ -39,6 +47,23 @@ export default class HermesKanbanPlugin extends Plugin {
           this.saveSettings();
         }
       }
+    });
+
+    this.addCommand({
+      id: 'check-native-hermes-connection',
+      name: 'Check Native Hermes Kanban connection',
+      callback: async () => {
+        if (this.settings.executionProvider !== 'hermes-native') {
+          new Notice('Hermes Kanban Bridge is using Legacy Markdown mode. Select Native Hermes in settings first.');
+          return;
+        }
+        const health = await this.nativeProvider().health();
+        new Notice(
+          health.ok
+            ? `Native Hermes Kanban connected: ${this.settings.hermesNativeBaseUrl}`
+            : `Native Hermes Kanban unavailable: ${health.message ?? 'unknown error'}`,
+        );
+      },
     });
 
     this.addCommand({
@@ -137,6 +162,45 @@ class HermesKanbanSettingTab extends PluginSettingTab {
           this.plugin.settings.trustMode = value as 'confirm' | 'auto';
           await this.plugin.saveSettings();
         }));
+
+    containerEl.createEl('hr');
+    containerEl.createEl('h3', { text: 'Execution Provider' });
+
+    new Setting(containerEl)
+      .setName('Execution backend')
+      .setDesc('Legacy Markdown keeps this plugin as the board engine. Native Hermes is an experimental read-only connection to Hermes Kanban; it does not yet write native tasks.')
+      .addDropdown(drop => drop
+        .addOption('legacy-markdown', 'Legacy Markdown boards')
+        .addOption('hermes-native', 'Native Hermes Kanban (experimental, read-only)')
+        .setValue(this.plugin.settings.executionProvider)
+        .onChange(async (value) => {
+          this.plugin.settings.executionProvider = value as 'legacy-markdown' | 'hermes-native';
+          await this.plugin.saveSettings();
+          this.display();
+        }));
+
+    if (this.plugin.settings.executionProvider === 'hermes-native') {
+      new Setting(containerEl)
+        .setName('Native Hermes endpoint')
+        .setDesc('Local dashboard endpoint. Loopback is required by default; remote transport is not yet supported.')
+        .addText(text => text
+          .setPlaceholder('http://127.0.0.1:9120')
+          .setValue(this.plugin.settings.hermesNativeBaseUrl)
+          .onChange(async (value) => {
+            this.plugin.settings.hermesNativeBaseUrl = value.trim();
+            await this.plugin.saveSettings();
+          }));
+
+      new Setting(containerEl)
+        .setName('Allow non-loopback endpoint')
+        .setDesc('Advanced unsafe override. Enable only after an authenticated native Hermes transport is available.')
+        .addToggle(toggle => toggle
+          .setValue(this.plugin.settings.hermesNativeAllowRemote)
+          .onChange(async (value) => {
+            this.plugin.settings.hermesNativeAllowRemote = value;
+            await this.plugin.saveSettings();
+          }));
+    }
 
     new Setting(containerEl)
       .setName('Enable server')
