@@ -3,6 +3,7 @@ import { HermesKanbanSettings, DEFAULT_SETTINGS } from './settings';
 import { KanbanServer } from './server';
 import { McpAdapter } from './mcp-adapter';
 import { HermesNativeProvider } from './hermes-native-provider';
+import { nativeRendererCss, registerHermesNativeRenderers } from './hermes-native-renderer';
 
 // Keep this in sync with manifest.json and package.json version
 export const PLUGIN_VERSION = '1.8.0';
@@ -36,6 +37,17 @@ export default class HermesKanbanPlugin extends Plugin {
     }
 
     this.addSettingTab(new HermesKanbanSettingTab(this.app, this));
+
+    if (this.settings.executionProvider === 'hermes-native') {
+      const style = document.createElement('style');
+      style.textContent = nativeRendererCss();
+      document.head.appendChild(style);
+      this.register(() => style.remove());
+      registerHermesNativeRenderers(
+        (language, processor) => this.registerMarkdownCodeBlockProcessor(language, processor),
+        () => this.nativeProvider(),
+      );
+    }
 
     this.addCommand({
       id: 'toggle-server',

@@ -1392,6 +1392,104 @@ var HermesNativeProvider = class {
   }
 };
 
+// src/hermes-native-renderer.ts
+function parseBlockConfig(source) {
+  const values = {};
+  for (const rawLine of source.split("\n")) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#"))
+      continue;
+    const separator = line.indexOf(":");
+    if (separator < 1)
+      continue;
+    const key = line.slice(0, separator).trim();
+    const value = line.slice(separator + 1).trim();
+    if (key && value)
+      values[key] = value;
+  }
+  return values;
+}
+function renderError(el, message) {
+  el.empty();
+  el.addClass("hermes-native-error");
+  el.createEl("strong", { text: "Native Hermes unavailable" });
+  el.createEl("div", { text: message });
+}
+function renderTask(el, task, stale, fetchedAt) {
+  el.empty();
+  el.addClass("hermes-native-task");
+  const header = el.createDiv({ cls: "hermes-native-header" });
+  header.createEl("strong", { text: task.title || task.id });
+  header.createEl("code", { text: task.status });
+  el.createEl("div", { text: `Task: ${task.id}` });
+  if (task.assignee)
+    el.createEl("div", { text: `Assignee: ${task.assignee}` });
+  if (task.blocker)
+    el.createEl("div", { text: `Blocked: ${task.blocker}` });
+  if (task.result)
+    el.createEl("div", { text: task.result, cls: "hermes-native-result" });
+  if (stale)
+    el.createEl("small", { text: `Cached state \u2014 last refreshed ${fetchedAt != null ? fetchedAt : "unknown"}`, cls: "hermes-native-stale" });
+}
+function renderBoard(el, board, stale, fetchedAt) {
+  var _a;
+  el.empty();
+  el.addClass("hermes-native-board");
+  el.createEl("strong", { text: board.name || board.id });
+  const statuses = /* @__PURE__ */ new Map();
+  for (const task of board.tasks)
+    statuses.set(task.status, ((_a = statuses.get(task.status)) != null ? _a : 0) + 1);
+  const summary = el.createEl("ul");
+  for (const [status, count] of statuses)
+    summary.createEl("li", { text: `${status}: ${count}` });
+  if (board.tasks.length === 0)
+    el.createEl("div", { text: "No tasks on this native board." });
+  if (stale)
+    el.createEl("small", { text: `Cached state \u2014 last refreshed ${fetchedAt != null ? fetchedAt : "unknown"}`, cls: "hermes-native-stale" });
+}
+function registerHermesNativeRenderers(registerCodeBlockProcessor, providerFactory) {
+  registerCodeBlockProcessor("hermes-task", async (source, el) => {
+    const config = parseBlockConfig(source);
+    if (!config.id)
+      return renderError(el, "A hermes-task block requires id: <native task id>.");
+    try {
+      const provider = providerFactory();
+      const task = await provider.getTask(config.id, config.board);
+      renderTask(el, task, false, (/* @__PURE__ */ new Date()).toISOString());
+    } catch (error) {
+      renderError(el, error instanceof Error ? error.message : String(error));
+    }
+  });
+  registerCodeBlockProcessor("hermes-board", async (source, el) => {
+    const config = parseBlockConfig(source);
+    if (!config.board)
+      return renderError(el, "A hermes-board block requires board: <native board slug>.");
+    try {
+      const provider = providerFactory();
+      const board = await provider.getBoard(config.board);
+      renderBoard(el, board, false, (/* @__PURE__ */ new Date()).toISOString());
+    } catch (error) {
+      renderError(el, error instanceof Error ? error.message : String(error));
+    }
+  });
+}
+function nativeRendererCss() {
+  return `
+.hermes-native-task, .hermes-native-board, .hermes-native-error {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 0.5em 0;
+  background: var(--background-secondary);
+}
+.hermes-native-header { display: flex; justify-content: space-between; gap: 12px; }
+.hermes-native-header code { color: var(--text-accent); }
+.hermes-native-result { margin-top: 8px; white-space: pre-wrap; }
+.hermes-native-stale { display: block; margin-top: 8px; color: var(--text-warning); }
+.hermes-native-error { border-color: var(--text-error); }
+`;
+}
+
 // src/main.ts
 var PLUGIN_VERSION = "1.8.0";
 var HermesKanbanPlugin = class extends import_obsidian5.Plugin {
@@ -1420,6 +1518,16 @@ var HermesKanbanPlugin = class extends import_obsidian5.Plugin {
       this.mcpAdapter.start();
     }
     this.addSettingTab(new HermesKanbanSettingTab(this.app, this));
+    if (this.settings.executionProvider === "hermes-native") {
+      const style = document.createElement("style");
+      style.textContent = nativeRendererCss();
+      document.head.appendChild(style);
+      this.register(() => style.remove());
+      registerHermesNativeRenderers(
+        (language, processor) => this.registerMarkdownCodeBlockProcessor(language, processor),
+        () => this.nativeProvider()
+      );
+    }
     this.addCommand({
       id: "toggle-server",
       name: "Toggle Hermes Kanban Bridge server",

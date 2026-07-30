@@ -125,6 +125,30 @@ Hermes uses the skills in `skills/` to orchestrate everything via the REST API. 
 
 ---
 
+## Experimental Native Hermes Mode
+
+The plugin now includes an experimental **Native Hermes Kanban** read-only mode.
+
+1. Open **Settings → Hermes Kanban Bridge**.
+2. Set **Execution backend** to `Native Hermes Kanban`.
+3. Keep the endpoint on the local default (`http://127.0.0.1:9120`) unless an authenticated remote transport is explicitly available.
+4. Run the command palette action **Check Native Hermes Kanban connection**.
+
+In this mode, native task state remains owned by Hermes. The plugin can render read-only blocks inside notes:
+
+````markdown
+```hermes-task
+id: t_abc123
+board: project-alpha
+```
+
+```hermes-board
+board: project-alpha
+```
+````
+
+These blocks are experimental and read-only. Task dispatch, comments, approvals, and other mutations are planned for later v2 work. Legacy Markdown board behavior remains the default.
+
 ## Troubleshooting
 
 ### curl: Failed to connect / connection refused
