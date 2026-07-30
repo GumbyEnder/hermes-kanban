@@ -70,9 +70,25 @@ The fixture test covers:
 - deterministic text and attachment size estimation
 - no implicit task-dispatch behavior
 
+## Obsidian preview command
+
+When **Native Hermes Kanban** is selected in plugin settings, run this command-palette action from an open Markdown note:
+
+```text
+Preview native Hermes task context from active note
+```
+
+The command includes:
+
+- the active note path and title;
+- selected editor text when present; otherwise the current heading/line label;
+- human-entered acceptance criteria and constraints.
+
+The modal shows every source, deterministic text/attachment estimates, and removal controls. **Save preview** only returns the reviewed packet locally and shows a confirmation notice. It does not call Hermes task creation, dispatch, upload, or any other mutation endpoint.
+
 ## Next slice
 
-Add the Obsidian preview modal and command-palette entry point, still without creating a native task. Native task creation follows only after the preview interaction is proven and reviewed.
+Add explicit linked-note and attachment selection controls to the preview modal. Native task creation follows only after the preview interaction is proven and reviewed.
 
 ## Related
 

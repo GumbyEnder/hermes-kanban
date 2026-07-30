@@ -1,9 +1,11 @@
-import { Plugin, PluginSettingTab, App, Setting, Notice } from 'obsidian';
+import { Plugin, PluginSettingTab, App, Setting, Notice, MarkdownView } from 'obsidian';
 import { HermesKanbanSettings, DEFAULT_SETTINGS } from './settings';
 import { KanbanServer } from './server';
 import { McpAdapter } from './mcp-adapter';
 import { HermesNativeProvider } from './hermes-native-provider';
 import { nativeRendererCss, registerHermesNativeRenderers } from './hermes-native-renderer';
+import { buildContextPacket } from './context-packet';
+import { contextPreviewCss, ContextPreviewModal } from './context-preview-modal';
 
 // Keep this in sync with manifest.json and package.json version
 export const PLUGIN_VERSION = '1.8.0';
@@ -40,7 +42,7 @@ export default class HermesKanbanPlugin extends Plugin {
 
     if (this.settings.executionProvider === 'hermes-native') {
       const style = document.createElement('style');
-      style.textContent = nativeRendererCss();
+      style.textContent = nativeRendererCss() + contextPreviewCss();
       document.head.appendChild(style);
       this.register(() => style.remove());
       registerHermesNativeRenderers(
@@ -75,6 +77,36 @@ export default class HermesKanbanPlugin extends Plugin {
             ? `Native Hermes Kanban connected: ${this.settings.hermesNativeBaseUrl}`
             : `Native Hermes Kanban unavailable: ${health.message ?? 'unknown error'}`,
         );
+      },
+    });
+
+    this.addCommand({
+      id: 'preview-context-from-active-note',
+      name: 'Preview native Hermes task context from active note',
+      callback: () => {
+        if (this.settings.executionProvider !== 'hermes-native') {
+          new Notice('Select Native Hermes Kanban in settings before preparing a native task context packet.');
+          return;
+        }
+        const file = this.app.workspace.getActiveFile();
+        const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (!file || !markdownView) {
+          new Notice('Open an Obsidian Markdown note before preparing task context.');
+          return;
+        }
+        const editor = markdownView.editor;
+        const selection = editor.getSelection();
+        const heading = selection ? undefined : editor.getLine(editor.getCursor().line).replace(/^#+\s*/, '').trim() || undefined;
+        const packet = buildContextPacket({
+          notePath: file.path,
+          noteTitle: file.basename,
+          heading,
+          selection: selection || undefined,
+        });
+        new ContextPreviewModal(this.app, packet, reviewed => {
+          const estimate = reviewed.sources.length;
+          new Notice(`Context preview saved locally: ${estimate} source(s). Native task dispatch is not enabled yet.`);
+        }).open();
       },
     });
 

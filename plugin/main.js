@@ -688,7 +688,7 @@ __export(main_exports, {
   default: () => HermesKanbanPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian5 = require("obsidian");
+var import_obsidian6 = require("obsidian");
 
 // src/settings.ts
 var DEFAULT_SETTINGS = {
@@ -1494,9 +1494,130 @@ function nativeRendererCss() {
 `;
 }
 
+// src/context-packet.ts
+function buildContextPacket(input) {
+  var _a, _b, _c, _d, _e, _f, _g;
+  const packet = {
+    version: 1,
+    source: { notePath: input.notePath, noteTitle: input.noteTitle, heading: input.heading },
+    sources: [],
+    acceptanceCriteria: ((_a = input.acceptanceCriteria) == null ? void 0 : _a.trim()) || void 0,
+    constraints: ((_b = input.constraints) == null ? void 0 : _b.trim()) || void 0
+  };
+  if (input.notePath) {
+    packet.sources.push({ id: `current-note:${input.notePath}`, kind: "current-note", path: input.notePath, title: input.noteTitle });
+  }
+  if ((_c = input.selection) == null ? void 0 : _c.trim()) {
+    packet.sources.push({ id: `selection:${(_d = input.notePath) != null ? _d : "untitled"}`, kind: "selection", path: input.notePath, title: input.heading, excerpt: input.selection.trim() });
+  }
+  for (const attachment of (_e = input.attachments) != null ? _e : []) {
+    packet.sources.push({ id: `attachment:${attachment.path}`, kind: "attachment", path: attachment.path, name: (_f = attachment.name) != null ? _f : attachment.path.split("/").pop(), sizeBytes: (_g = attachment.sizeBytes) != null ? _g : 0 });
+  }
+  return packet;
+}
+function removeContextSource(packet, sourceId) {
+  return { ...packet, sources: packet.sources.filter((source) => source.id !== sourceId) };
+}
+function estimateContextPacket(packet) {
+  const text = [
+    packet.source.notePath,
+    packet.source.noteTitle,
+    packet.source.heading,
+    packet.acceptanceCriteria,
+    packet.constraints,
+    ...packet.sources.map((source) => {
+      var _a, _b, _c;
+      return `${(_a = source.path) != null ? _a : ""}
+${(_b = source.title) != null ? _b : ""}
+${(_c = source.excerpt) != null ? _c : ""}`;
+    })
+  ].filter(Boolean).join("\n");
+  return {
+    textBytes: new TextEncoder().encode(text).byteLength,
+    attachmentBytes: packet.sources.reduce((sum, source) => {
+      var _a;
+      return sum + (source.kind === "attachment" ? (_a = source.sizeBytes) != null ? _a : 0 : 0);
+    }, 0),
+    sourceCount: packet.sources.length
+  };
+}
+
+// src/context-preview-modal.ts
+var import_obsidian5 = require("obsidian");
+var ContextPreviewModal = class extends import_obsidian5.Modal {
+  constructor(app, packet, onApprove) {
+    super(app);
+    this.packet = packet;
+    this.estimate = estimateContextPacket(packet);
+    this.onApprove = onApprove;
+  }
+  onOpen() {
+    this.render();
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+  render() {
+    var _a, _b, _c, _d, _e;
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h2", { text: "Review Hermes task context" });
+    contentEl.createEl("p", {
+      text: "Preview only. Confirming this dialog does not create or dispatch a native Hermes task yet."
+    });
+    const summary = contentEl.createEl("p", {
+      text: `${this.estimate.sourceCount} source(s) \xB7 ${this.estimate.textBytes} text bytes \xB7 ${this.estimate.attachmentBytes} attachment bytes`
+    });
+    summary.addClass("hermes-context-summary");
+    contentEl.createEl("h3", { text: "Included sources" });
+    const sources = contentEl.createEl("div", { cls: "hermes-context-sources" });
+    for (const source of this.packet.sources) {
+      const row = sources.createDiv({ cls: "hermes-context-source" });
+      row.createEl("strong", { text: source.kind });
+      row.createEl("div", { text: (_c = (_b = (_a = source.title) != null ? _a : source.name) != null ? _b : source.path) != null ? _c : "Untitled source" });
+      if (source.path)
+        row.createEl("small", { text: source.path });
+      if (source.excerpt)
+        row.createEl("pre", { text: source.excerpt });
+      new import_obsidian5.ButtonComponent(row).setButtonText("Remove").onClick(() => {
+        this.packet = removeContextSource(this.packet, source.id);
+        this.estimate = estimateContextPacket(this.packet);
+        this.render();
+      });
+    }
+    contentEl.createEl("h3", { text: "Acceptance criteria" });
+    const acceptance = new import_obsidian5.TextAreaComponent(contentEl).setPlaceholder("What must be true before the future task can be considered complete?").setValue((_d = this.packet.acceptanceCriteria) != null ? _d : "");
+    acceptance.inputEl.rows = 4;
+    acceptance.onChange((value) => {
+      this.packet = { ...this.packet, acceptanceCriteria: value.trim() || void 0 };
+      this.estimate = estimateContextPacket(this.packet);
+    });
+    contentEl.createEl("h3", { text: "Constraints" });
+    const constraints = new import_obsidian5.TextAreaComponent(contentEl).setPlaceholder("Scope limits, safety rules, or things the worker must not do").setValue((_e = this.packet.constraints) != null ? _e : "");
+    constraints.inputEl.rows = 3;
+    constraints.onChange((value) => {
+      this.packet = { ...this.packet, constraints: value.trim() || void 0 };
+      this.estimate = estimateContextPacket(this.packet);
+    });
+    const buttons = contentEl.createDiv({ cls: "modal-button-container" });
+    new import_obsidian5.ButtonComponent(buttons).setButtonText("Save preview").setCta().onClick(() => {
+      this.close();
+      this.onApprove(this.packet);
+    });
+    new import_obsidian5.ButtonComponent(buttons).setButtonText("Cancel").onClick(() => this.close());
+  }
+};
+function contextPreviewCss() {
+  return `
+.hermes-context-summary { color: var(--text-muted); }
+.hermes-context-source { border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 8px; margin: 8px 0; }
+.hermes-context-source pre { white-space: pre-wrap; max-height: 9em; overflow: auto; background: var(--background-primary); padding: 6px; }
+`;
+}
+
 // src/main.ts
 var PLUGIN_VERSION = "1.8.0";
-var HermesKanbanPlugin = class extends import_obsidian5.Plugin {
+var HermesKanbanPlugin = class extends import_obsidian6.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
@@ -1524,7 +1645,7 @@ var HermesKanbanPlugin = class extends import_obsidian5.Plugin {
     this.addSettingTab(new HermesKanbanSettingTab(this.app, this));
     if (this.settings.executionProvider === "hermes-native") {
       const style = document.createElement("style");
-      style.textContent = nativeRendererCss();
+      style.textContent = nativeRendererCss() + contextPreviewCss();
       document.head.appendChild(style);
       this.register(() => style.remove());
       registerHermesNativeRenderers(
@@ -1549,13 +1670,42 @@ var HermesKanbanPlugin = class extends import_obsidian5.Plugin {
       callback: async () => {
         var _a;
         if (this.settings.executionProvider !== "hermes-native") {
-          new import_obsidian5.Notice("Hermes Kanban Bridge is using Legacy Markdown mode. Select Native Hermes in settings first.");
+          new import_obsidian6.Notice("Hermes Kanban Bridge is using Legacy Markdown mode. Select Native Hermes in settings first.");
           return;
         }
         const health = await this.nativeProvider().health();
-        new import_obsidian5.Notice(
+        new import_obsidian6.Notice(
           health.ok ? `Native Hermes Kanban connected: ${this.settings.hermesNativeBaseUrl}` : `Native Hermes Kanban unavailable: ${(_a = health.message) != null ? _a : "unknown error"}`
         );
+      }
+    });
+    this.addCommand({
+      id: "preview-context-from-active-note",
+      name: "Preview native Hermes task context from active note",
+      callback: () => {
+        if (this.settings.executionProvider !== "hermes-native") {
+          new import_obsidian6.Notice("Select Native Hermes Kanban in settings before preparing a native task context packet.");
+          return;
+        }
+        const file = this.app.workspace.getActiveFile();
+        const markdownView = this.app.workspace.getActiveViewOfType(import_obsidian6.MarkdownView);
+        if (!file || !markdownView) {
+          new import_obsidian6.Notice("Open an Obsidian Markdown note before preparing task context.");
+          return;
+        }
+        const editor = markdownView.editor;
+        const selection = editor.getSelection();
+        const heading = selection ? void 0 : editor.getLine(editor.getCursor().line).replace(/^#+\s*/, "").trim() || void 0;
+        const packet = buildContextPacket({
+          notePath: file.path,
+          noteTitle: file.basename,
+          heading,
+          selection: selection || void 0
+        });
+        new ContextPreviewModal(this.app, packet, (reviewed) => {
+          const estimate = reviewed.sources.length;
+          new import_obsidian6.Notice(`Context preview saved locally: ${estimate} source(s). Native task dispatch is not enabled yet.`);
+        }).open();
       }
     });
     this.addCommand({
@@ -1582,7 +1732,7 @@ var HermesKanbanPlugin = class extends import_obsidian5.Plugin {
       callback: async () => {
         const releaseUrl = "https://github.com/GumbyEnder/hermes-kanban/releases";
         await navigator.clipboard.writeText(releaseUrl);
-        new import_obsidian5.Notice("Hermes Kanban Bridge: Release URL copied to clipboard. Check BRAT for updates on GitHub Releases.");
+        new import_obsidian6.Notice("Hermes Kanban Bridge: Release URL copied to clipboard. Check BRAT for updates on GitHub Releases.");
       }
     });
     console.log("Hermes Kanban Bridge loaded");
@@ -1600,7 +1750,7 @@ var HermesKanbanPlugin = class extends import_obsidian5.Plugin {
     await this.saveData(this.settings);
   }
 };
-var HermesKanbanSettingTab = class extends import_obsidian5.PluginSettingTab {
+var HermesKanbanSettingTab = class extends import_obsidian6.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -1609,52 +1759,52 @@ var HermesKanbanSettingTab = class extends import_obsidian5.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "Hermes Kanban Bridge Settings" });
-    new import_obsidian5.Setting(containerEl).setName("Port").setDesc("Local port for the REST API (default: 27124)").addText((text) => text.setPlaceholder("27124").setValue(String(this.plugin.settings.port)).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Port").setDesc("Local port for the REST API (default: 27124)").addText((text) => text.setPlaceholder("27124").setValue(String(this.plugin.settings.port)).onChange(async (value) => {
       const port = parseInt(value);
       if (!isNaN(port) && port > 1024 && port < 65535) {
         this.plugin.settings.port = port;
         await this.plugin.saveSettings();
       }
     }));
-    new import_obsidian5.Setting(containerEl).setName("Board folder").setDesc("Vault folder where Kanban boards are stored").addText((text) => text.setPlaceholder("Kanban").setValue(this.plugin.settings.boardFolder).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Board folder").setDesc("Vault folder where Kanban boards are stored").addText((text) => text.setPlaceholder("Kanban").setValue(this.plugin.settings.boardFolder).onChange(async (value) => {
       this.plugin.settings.boardFolder = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian5.Setting(containerEl).setName("Trust mode").setDesc("Confirm: show approval modal. Auto: allow writes without prompting.").addDropdown((drop) => drop.addOption("confirm", "Confirm (ask before writing)").addOption("auto", "Auto-trust (no prompts)").setValue(this.plugin.settings.trustMode).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Trust mode").setDesc("Confirm: show approval modal. Auto: allow writes without prompting.").addDropdown((drop) => drop.addOption("confirm", "Confirm (ask before writing)").addOption("auto", "Auto-trust (no prompts)").setValue(this.plugin.settings.trustMode).onChange(async (value) => {
       this.plugin.settings.trustMode = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("hr");
     containerEl.createEl("h3", { text: "Execution Provider" });
-    new import_obsidian5.Setting(containerEl).setName("Execution backend").setDesc("Legacy Markdown keeps this plugin as the board engine. Native Hermes is an experimental read-only connection to Hermes Kanban; it does not yet write native tasks.").addDropdown((drop) => drop.addOption("legacy-markdown", "Legacy Markdown boards").addOption("hermes-native", "Native Hermes Kanban (experimental, read-only)").setValue(this.plugin.settings.executionProvider).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Execution backend").setDesc("Legacy Markdown keeps this plugin as the board engine. Native Hermes is an experimental read-only connection to Hermes Kanban; it does not yet write native tasks.").addDropdown((drop) => drop.addOption("legacy-markdown", "Legacy Markdown boards").addOption("hermes-native", "Native Hermes Kanban (experimental, read-only)").setValue(this.plugin.settings.executionProvider).onChange(async (value) => {
       this.plugin.settings.executionProvider = value;
       await this.plugin.saveSettings();
       this.display();
     }));
     if (this.plugin.settings.executionProvider === "hermes-native") {
-      new import_obsidian5.Setting(containerEl).setName("Native Hermes endpoint").setDesc("Local dashboard endpoint. Loopback is required by default; remote transport is not yet supported.").addText((text) => text.setPlaceholder("http://127.0.0.1:9120").setValue(this.plugin.settings.hermesNativeBaseUrl).onChange(async (value) => {
+      new import_obsidian6.Setting(containerEl).setName("Native Hermes endpoint").setDesc("Local dashboard endpoint. Loopback is required by default; remote transport is not yet supported.").addText((text) => text.setPlaceholder("http://127.0.0.1:9120").setValue(this.plugin.settings.hermesNativeBaseUrl).onChange(async (value) => {
         this.plugin.settings.hermesNativeBaseUrl = value.trim();
         await this.plugin.saveSettings();
       }));
-      new import_obsidian5.Setting(containerEl).setName("Allow non-loopback endpoint").setDesc("Advanced unsafe override. Enable only after an authenticated native Hermes transport is available.").addToggle((toggle) => toggle.setValue(this.plugin.settings.hermesNativeAllowRemote).onChange(async (value) => {
+      new import_obsidian6.Setting(containerEl).setName("Allow non-loopback endpoint").setDesc("Advanced unsafe override. Enable only after an authenticated native Hermes transport is available.").addToggle((toggle) => toggle.setValue(this.plugin.settings.hermesNativeAllowRemote).onChange(async (value) => {
         this.plugin.settings.hermesNativeAllowRemote = value;
         await this.plugin.saveSettings();
       }));
     }
-    new import_obsidian5.Setting(containerEl).setName("Enable server").setDesc("Start the REST API server when Obsidian loads").addToggle((toggle) => toggle.setValue(this.plugin.settings.enabled).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Enable server").setDesc("Start the REST API server when Obsidian loads").addToggle((toggle) => toggle.setValue(this.plugin.settings.enabled).onChange(async (value) => {
       var _a, _b;
       this.plugin.settings.enabled = value;
       await this.plugin.saveSettings();
       value ? (_a = this.plugin.server) == null ? void 0 : _a.start() : (_b = this.plugin.server) == null ? void 0 : _b.stop();
     }));
-    new import_obsidian5.Setting(containerEl).setName("Due date notification interval").setDesc("Check for overdue cards every N minutes (0 = disabled). Shows an Obsidian notice for each overdue card.").addText((text) => text.setPlaceholder("15").setValue(String(this.plugin.settings.notificationInterval)).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Due date notification interval").setDesc("Check for overdue cards every N minutes (0 = disabled). Shows an Obsidian notice for each overdue card.").addText((text) => text.setPlaceholder("15").setValue(String(this.plugin.settings.notificationInterval)).onChange(async (value) => {
       const minutes = parseInt(value);
       if (!isNaN(minutes) && minutes >= 0) {
         this.plugin.settings.notificationInterval = minutes;
         await this.plugin.saveSettings();
       }
     }));
-    new import_obsidian5.Setting(containerEl).setName("Enable MCP adapter").setDesc("Expose Kanban tools via MCP on port " + (this.plugin.settings.port + 1) + " (Claude Desktop, Cursor, Zed, etc.)").addToggle((toggle) => toggle.setValue(this.plugin.settings.mcpEnabled).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Enable MCP adapter").setDesc("Expose Kanban tools via MCP on port " + (this.plugin.settings.port + 1) + " (Claude Desktop, Cursor, Zed, etc.)").addToggle((toggle) => toggle.setValue(this.plugin.settings.mcpEnabled).onChange(async (value) => {
       var _a;
       this.plugin.settings.mcpEnabled = value;
       await this.plugin.saveSettings();
@@ -1672,31 +1822,31 @@ var HermesKanbanSettingTab = class extends import_obsidian5.PluginSettingTab {
     }));
     containerEl.createEl("hr");
     containerEl.createEl("h3", { text: "GitHub Integration" });
-    new import_obsidian5.Setting(containerEl).setName("GitHub Token").setDesc("Personal access token with repo access. Stored locally only.").addText((text) => {
+    new import_obsidian6.Setting(containerEl).setName("GitHub Token").setDesc("Personal access token with repo access. Stored locally only.").addText((text) => {
       text.inputEl.type = "password";
       text.setValue(this.plugin.settings.githubToken).onChange(async (value) => {
         this.plugin.settings.githubToken = value;
         await this.plugin.saveSettings();
       });
     });
-    new import_obsidian5.Setting(containerEl).setName("GitHub Owner").setDesc("Your GitHub username or organization name.").addText((text) => text.setPlaceholder("Username or org").setValue(this.plugin.settings.githubOwner).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("GitHub Owner").setDesc("Your GitHub username or organization name.").addText((text) => text.setPlaceholder("Username or org").setValue(this.plugin.settings.githubOwner).onChange(async (value) => {
       this.plugin.settings.githubOwner = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian5.Setting(containerEl).setName("GitHub Repo").setDesc("The repository name to sync issues with.").addText((text) => text.setPlaceholder("repo-name").setValue(this.plugin.settings.githubRepo).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("GitHub Repo").setDesc("The repository name to sync issues with.").addText((text) => text.setPlaceholder("repo-name").setValue(this.plugin.settings.githubRepo).onChange(async (value) => {
       this.plugin.settings.githubRepo = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian5.Setting(containerEl).setName("GitHub Project ID").setDesc("Numeric ID of the GitHub Projects board for card sync.").addText((text) => text.setPlaceholder("0").setValue(String(this.plugin.settings.githubProjectId)).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("GitHub Project ID").setDesc("Numeric ID of the GitHub Projects board for card sync.").addText((text) => text.setPlaceholder("0").setValue(String(this.plugin.settings.githubProjectId)).onChange(async (value) => {
       const id = parseInt(value);
       this.plugin.settings.githubProjectId = isNaN(id) ? 0 : id;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian5.Setting(containerEl).setName("Sync Issues").setDesc("How to sync Kanban cards with GitHub Issues.").addDropdown((drop) => drop.addOption("off", "Off (no sync)").addOption("push", "Push only (Kanban to GitHub)").addOption("pull", "Pull only (GitHub to Kanban)").addOption("bidirectional", "Bidirectional").setValue(this.plugin.settings.syncIssues).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Sync Issues").setDesc("How to sync Kanban cards with GitHub Issues.").addDropdown((drop) => drop.addOption("off", "Off (no sync)").addOption("push", "Push only (Kanban to GitHub)").addOption("pull", "Pull only (GitHub to Kanban)").addOption("bidirectional", "Bidirectional").setValue(this.plugin.settings.syncIssues).onChange(async (value) => {
       this.plugin.settings.syncIssues = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian5.Setting(containerEl).setName("Sync Projects").setDesc("How to sync Kanban cards with GitHub Projects board.").addDropdown((drop) => drop.addOption("off", "Off (no sync)").addOption("push", "Push only (Kanban to GitHub)").addOption("pull", "Pull only (GitHub to Kanban)").addOption("bidirectional", "Bidirectional").setValue(this.plugin.settings.syncProjects).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Sync Projects").setDesc("How to sync Kanban cards with GitHub Projects board.").addDropdown((drop) => drop.addOption("off", "Off (no sync)").addOption("push", "Push only (Kanban to GitHub)").addOption("pull", "Pull only (GitHub to Kanban)").addOption("bidirectional", "Bidirectional").setValue(this.plugin.settings.syncProjects).onChange(async (value) => {
       this.plugin.settings.syncProjects = value;
       await this.plugin.saveSettings();
     }));
