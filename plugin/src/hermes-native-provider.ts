@@ -115,20 +115,27 @@ export class HermesNativeProvider {
   }
 
   async getBoard(boardId: string): Promise<ExecutionBoard> {
+    return (await this.getBoardWithState(boardId)).value;
+  }
+
+  async getBoardWithState(boardId: string): Promise<ProviderReadResult<ExecutionBoard>> {
     const key = `board:${boardId}`;
-    const result = await this.readWithCache(key, async () => {
+    return this.readWithCache(key, async () => {
       const payload = await this.request<{ columns?: Array<{ name?: string; tasks?: unknown[] }> }>(`/api/plugins/kanban/board?board=${encodeURIComponent(boardId)}`);
       const tasks = (payload.columns ?? []).flatMap(column =>
         (column.tasks ?? []).map(task => this.mapTask(task as Record<string, unknown>, boardId)),
       );
       return { id: boardId, name: boardId, tasks };
     });
-    return result.value;
   }
 
   async getTask(taskId: string, boardId?: string): Promise<ExecutionTask> {
+    return (await this.getTaskWithState(taskId, boardId)).value;
+  }
+
+  async getTaskWithState(taskId: string, boardId?: string): Promise<ProviderReadResult<ExecutionTask>> {
     const key = `task:${boardId ?? ''}:${taskId}`;
-    const result = await this.readWithCache(key, async () => {
+    return this.readWithCache(key, async () => {
       const suffix = boardId ? `?board=${encodeURIComponent(boardId)}` : '';
       const payload = await this.request<Record<string, unknown>>(`/api/plugins/kanban/tasks/${encodeURIComponent(taskId)}${suffix}`);
       const task = this.mapTask((payload.task ?? {}) as Record<string, unknown>, boardId);
@@ -139,7 +146,6 @@ export class HermesNativeProvider {
       task.links = { parents: links?.parents ?? [], children: links?.children ?? [] };
       return task;
     });
-    return result.value;
   }
 
   async listProfiles(): Promise<ExecutionProfile[]> {

@@ -86,8 +86,8 @@ export function registerHermesNativeRenderers(
     if (!config.id) return renderError(el, 'A hermes-task block requires id: <native task id>.');
     try {
       const provider = providerFactory();
-      const task = await provider.getTask(config.id, config.board);
-      renderTask(el, task, false, new Date().toISOString());
+      const state = await provider.getTaskWithState(config.id, config.board);
+      renderTask(el, state.value, state.stale, state.fetchedAt);
     } catch (error) {
       renderError(el, error instanceof Error ? error.message : String(error));
     }
@@ -98,8 +98,8 @@ export function registerHermesNativeRenderers(
     if (!config.board) return renderError(el, 'A hermes-board block requires board: <native board slug>.');
     try {
       const provider = providerFactory();
-      const board = await provider.getBoard(config.board);
-      renderBoard(el, board, false, new Date().toISOString());
+      const state = await provider.getBoardWithState(config.board);
+      renderBoard(el, state.value, state.stale, state.fetchedAt);
     } catch (error) {
       renderError(el, error instanceof Error ? error.message : String(error));
     }

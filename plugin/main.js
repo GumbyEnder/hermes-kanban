@@ -1285,8 +1285,11 @@ var HermesNativeProvider = class {
     });
   }
   async getBoard(boardId) {
+    return (await this.getBoardWithState(boardId)).value;
+  }
+  async getBoardWithState(boardId) {
     const key = `board:${boardId}`;
-    const result = await this.readWithCache(key, async () => {
+    return this.readWithCache(key, async () => {
       var _a;
       const payload = await this.request(`/api/plugins/kanban/board?board=${encodeURIComponent(boardId)}`);
       const tasks = ((_a = payload.columns) != null ? _a : []).flatMap(
@@ -1297,11 +1300,13 @@ var HermesNativeProvider = class {
       );
       return { id: boardId, name: boardId, tasks };
     });
-    return result.value;
   }
   async getTask(taskId, boardId) {
+    return (await this.getTaskWithState(taskId, boardId)).value;
+  }
+  async getTaskWithState(taskId, boardId) {
     const key = `task:${boardId != null ? boardId : ""}:${taskId}`;
-    const result = await this.readWithCache(key, async () => {
+    return this.readWithCache(key, async () => {
       var _a, _b, _c;
       const suffix = boardId ? `?board=${encodeURIComponent(boardId)}` : "";
       const payload = await this.request(`/api/plugins/kanban/tasks/${encodeURIComponent(taskId)}${suffix}`);
@@ -1313,7 +1318,6 @@ var HermesNativeProvider = class {
       task.links = { parents: (_b = links == null ? void 0 : links.parents) != null ? _b : [], children: (_c = links == null ? void 0 : links.children) != null ? _c : [] };
       return task;
     });
-    return result.value;
   }
   async listProfiles() {
     var _a;
@@ -1454,8 +1458,8 @@ function registerHermesNativeRenderers(registerCodeBlockProcessor, providerFacto
       return renderError(el, "A hermes-task block requires id: <native task id>.");
     try {
       const provider = providerFactory();
-      const task = await provider.getTask(config.id, config.board);
-      renderTask(el, task, false, (/* @__PURE__ */ new Date()).toISOString());
+      const state = await provider.getTaskWithState(config.id, config.board);
+      renderTask(el, state.value, state.stale, state.fetchedAt);
     } catch (error) {
       renderError(el, error instanceof Error ? error.message : String(error));
     }
@@ -1466,8 +1470,8 @@ function registerHermesNativeRenderers(registerCodeBlockProcessor, providerFacto
       return renderError(el, "A hermes-board block requires board: <native board slug>.");
     try {
       const provider = providerFactory();
-      const board = await provider.getBoard(config.board);
-      renderBoard(el, board, false, (/* @__PURE__ */ new Date()).toISOString());
+      const state = await provider.getBoardWithState(config.board);
+      renderBoard(el, state.value, state.stale, state.fetchedAt);
     } catch (error) {
       renderError(el, error instanceof Error ? error.message : String(error));
     }
